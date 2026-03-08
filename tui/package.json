@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "dev": "bun run src/cli/index.ts",
     "start": "bun run dist/cli/index.js",
-    "test": "vitest run"
+    "test": "npm run test:unit",
+    "test:unit": "vitest run test/config.test.ts test/discovery.test.ts test/workspace.test.ts",
+    "test:e2e": "vitest run test/e2e/*.test.ts"
   },
   "dependencies": {
     "@opentui/core": "^0.1.84",

@@ -75,6 +75,15 @@ _wks apply --workspace /abs/path/to/file.code-workspace --keep 0,2,4
 _wks validate --workspace /abs/path/to/file.code-workspace
 ```
 
+## Testing
+
+```bash
+npm test
+npm run test:e2e
+```
+
+`test:e2e` covers both the terminal-driven TUI flow and real CLI subprocess flows. `tmux` and `bun` must be available on the machine.
+
 ## Safety behavior
 
 - Reuses an existing workspace file in selected root:
