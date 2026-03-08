@@ -18,6 +18,7 @@ type FixtureContext = {
   binDir: string;
   editorLogPath: string;
   cursorLogPath: string;
+  nvimLogPath: string;
 };
 
 function runTmux(args: string[]): string {
@@ -39,10 +40,12 @@ export async function createFixtureContext(): Promise<FixtureContext> {
   const binDir = path.join(rootDir, "bin");
   const editorLogPath = path.join(rootDir, "editor.log");
   const cursorLogPath = path.join(rootDir, "cursor.log");
+  const nvimLogPath = path.join(rootDir, "nvim.log");
 
   await mkdir(binDir, { recursive: true });
   await writeStubBinary(path.join(binDir, "stub-editor"), editorLogPath);
   await writeStubBinary(path.join(binDir, "cursor"), cursorLogPath);
+  await writeStubBinary(path.join(binDir, "nvim"), nvimLogPath);
 
   return {
     rootDir,
@@ -50,6 +53,7 @@ export async function createFixtureContext(): Promise<FixtureContext> {
     binDir,
     editorLogPath,
     cursorLogPath,
+    nvimLogPath,
   };
 }
 
@@ -126,12 +130,14 @@ export class TmuxHarness {
     configPath: string;
     binDir: string;
     editorCommand?: string;
+    nvimServer?: string;
   }): Promise<TmuxHarness> {
     const sessionName = `wks-e2e-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const env = {
       PATH: `${options.binDir}:${process.env.PATH ?? ""}`,
       WORKSPACE_MANAGER_CONFIG: options.configPath,
       EDITOR: options.editorCommand ?? "stub-editor --wait",
+      NVIM: options.nvimServer ?? "",
       TERM: process.env.TERM ?? "screen-256color",
     };
 

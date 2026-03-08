@@ -257,6 +257,47 @@ describe("tui e2e", () => {
     },
     20_000,
   );
+
+  it(
+    "uses parent nvim remote open when running inside nvim and editor is nvim-family",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      const workspacePath = await writeWorkspaceFile(rootPath, "apischeduler.code-workspace", '{ "folders": [] }\n');
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+      ]);
+
+      const harness = await TmuxHarness.launch({
+        workdir: path.resolve(testDir, "..", ".."),
+        entrypoint: path.join("src", "cli", "index.ts"),
+        configPath: fixture.workspaceConfigPath,
+        binDir: fixture.binDir,
+        editorCommand: "nvim",
+        nvimServer: "/tmp/nvim-parent.sock",
+      });
+      harnesses.push(harness);
+
+      await harness.waitForText("Root Workspace");
+
+      harness.sendKey("o");
+      await harness.waitForText(`Config opened: ${fixture.workspaceConfigPath}`);
+      await harness.waitForText("Root Workspace");
+
+      harness.sendKey("i");
+      await harness.waitForText(`Inspected in editor: ${workspacePath}`);
+      await harness.waitForText("Root Workspace");
+
+      const nvimLogs = await readLogLines(fixture.nvimLogPath);
+      expect(nvimLogs).toContain(`--server /tmp/nvim-parent.sock --remote ${fixture.workspaceConfigPath}`);
+      expect(nvimLogs).toContain(`--server /tmp/nvim-parent.sock --remote ${workspacePath}`);
+    },
+    20_000,
+  );
 });
 
 async function setupFixture() {

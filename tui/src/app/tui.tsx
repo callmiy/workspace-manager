@@ -184,6 +184,16 @@ function launchEditorWithFile(editorCommand: string, filePath: string): ReturnTy
   if (!binary) {
     return null;
   }
+
+  const editorBasename = path.basename(binary).toLowerCase();
+  const nvimServer = process.env.NVIM?.trim();
+  const isNeovimFamilyEditor =
+    editorBasename === "nvim" || editorBasename.startsWith("nvim-") || editorBasename === "vim" || editorBasename === "vi";
+
+  if (nvimServer && isNeovimFamilyEditor) {
+    return launchBinary("nvim", ["--server", nvimServer, "--remote", filePath]);
+  }
+
   return launchBinary(binary, [...args, filePath]);
 }
 
