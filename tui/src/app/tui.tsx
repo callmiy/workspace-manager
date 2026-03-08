@@ -1,9 +1,9 @@
 import * as OpenTuiCore from "@opentui/core";
 import * as OpenTuiReact from "@opentui/react";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { UserConfig, WorkspaceRef } from "../domain/types.js";
 import { defaultConfig, ensureConfigDir, loadConfig, resolveConfigPath } from "../config/config.js";
 import { discoverWorkspaces } from "../io/discovery.js";
@@ -121,29 +121,70 @@ function lowerCaseWorkspaceFilename(name: string): string {
   return `${name.toLowerCase()}.code-workspace`;
 }
 
-function resolveWorkspaceTargetSync(rootWorkspacePath: string): string | null {
-  const root = path.resolve(rootWorkspacePath);
-  const scan = (dir: string): string[] => {
-    if (!existsSync(dir)) {
-      return [];
-    }
-    try {
-      return readdirSync(dir, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".code-workspace"))
-        .map((entry) => path.resolve(dir, entry.name))
-        .sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
-    } catch {
-      return [];
-    }
-  };
+function parseCommand(command: string): string[] | null {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
 
-  const rootMatches = scan(root);
-  if (rootMatches.length > 0) {
-    return rootMatches[0] ?? null;
+  for (const char of command.trim()) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      if (!quote) {
+        quote = char;
+        continue;
+      }
+      if (quote === char) {
+        quote = null;
+        continue;
+      }
+      current += char;
+      continue;
+    }
+    if (!quote && /\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
   }
 
-  const vscodeMatches = scan(path.join(root, ".vscode"));
-  return vscodeMatches[0] ?? null;
+  if (escaped || quote) {
+    return null;
+  }
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens.length > 0 ? tokens : null;
+}
+
+function launchBinary(binary: string, args: string[]): ReturnType<typeof spawnSync> {
+  return spawnSync(binary, args, {
+    stdio: "inherit",
+    shell: false,
+  });
+}
+
+function launchEditorWithFile(editorCommand: string, filePath: string): ReturnType<typeof spawnSync> | null {
+  const parsed = parseCommand(editorCommand);
+  if (!parsed) {
+    return null;
+  }
+  const [binary, ...args] = parsed;
+  if (!binary) {
+    return null;
+  }
+  return launchBinary(binary, [...args, filePath]);
 }
 
 function buildFolderObjects(root: WorkspaceRef, associates: WorkspaceRef[]): Record<string, unknown>[] {
@@ -188,6 +229,9 @@ function App({ onExit }: { onExit: () => void }) {
   const [messageTone, setMessageTone] = useState<MessageTone>("info");
   const [showKeymaps, setShowKeymaps] = useState(true);
   const [renderEpoch, setRenderEpoch] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
+  const [previewTargetPath, setPreviewTargetPath] = useState("");
+  const refreshRequestIdRef = useRef(0);
   const messageFg =
     messageTone === "error" ? "#f87171" : messageTone === "success" ? "#4ade80" : undefined;
 
@@ -198,11 +242,16 @@ function App({ onExit }: { onExit: () => void }) {
 
   async function refreshWorkspaces(): Promise<void> {
     const configPath = resolveConfigPath();
+    const requestId = refreshRequestIdRef.current + 1;
+    refreshRequestIdRef.current = requestId;
     setIsRefreshing(true);
 
     try {
       const loadedConfig = await loadConfig(configPath);
       const refs = await discoverWorkspaces(loadedConfig);
+      if (requestId !== refreshRequestIdRef.current) {
+        return;
+      }
       setConfig(loadedConfig);
       setWorkspaces(refs);
       setSelectedRootIndex(0);
@@ -210,12 +259,17 @@ function App({ onExit }: { onExit: () => void }) {
         setStatus(`No root workspaces found in ${configPath}`);
       }
     } catch (error: unknown) {
+      if (requestId !== refreshRequestIdRef.current) {
+        return;
+      }
       setConfig(defaultConfig());
       setWorkspaces([]);
       setSelectedRootIndex(0);
       setStatus(`Failed to load config ${configPath}: ${String(error)}`, "error");
     } finally {
-      setIsRefreshing(false);
+      if (requestId === refreshRequestIdRef.current) {
+        setIsRefreshing(false);
+      }
     }
   }
 
@@ -287,11 +341,28 @@ function App({ onExit }: { onExit: () => void }) {
     kept.push(`… (${lines.length - kept.length} more lines)`);
     return kept;
   }, [previewJson, previewMaxLines]);
-  const previewTargetPath = useMemo(() => {
+  useEffect(() => {
     if (!selectedRoot) {
-      return "";
+      setPreviewTargetPath("");
+      return;
     }
-    return resolveWorkspaceTargetSync(selectedRoot.path) ?? path.join(selectedRoot.path, lowerCaseWorkspaceFilename(selectedRoot.name));
+    let cancelled = false;
+    const fallback = path.join(selectedRoot.path, lowerCaseWorkspaceFilename(selectedRoot.name));
+    setPreviewTargetPath(fallback);
+    void resolveWorkspaceTarget(selectedRoot.path)
+      .then((resolved) => {
+        if (!cancelled) {
+          setPreviewTargetPath(resolved ?? fallback);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreviewTargetPath(fallback);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedRoot]);
 
   useEffect(() => {
@@ -376,9 +447,10 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function saveSelection(): Promise<void> {
-    if (!selectedRoot) {
+    if (!selectedRoot || isSaving) {
       return;
     }
+    setIsSaving(true);
 
     const folders = previewFolders.map((entry) => {
       const { name, path: folderPath, ...metadata } = entry;
@@ -404,6 +476,8 @@ function App({ onExit }: { onExit: () => void }) {
     } catch (error: unknown) {
       setStatus(`Save failed: ${String(error)}`, "error");
       setScreen("associate");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -416,11 +490,11 @@ function App({ onExit }: { onExit: () => void }) {
 
     const configPath = resolveConfigPath();
     await ensureConfigDir(configPath);
-    const command = `${editor} ${JSON.stringify(configPath)}`;
-    const result = spawnSync(command, {
-      stdio: "inherit",
-      shell: true,
-    });
+    const result = launchEditorWithFile(editor, configPath);
+    if (!result) {
+      setStatus("Cannot open config: invalid $EDITOR command", "error");
+      return;
+    }
 
     if (result.error) {
       setStatus(`Failed to open config in editor: ${String(result.error)}`, "error");
@@ -452,17 +526,13 @@ function App({ onExit }: { onExit: () => void }) {
       return;
     }
 
-    const workspacePath = resolveWorkspaceTargetSync(resolvedRootPath);
+    const workspacePath = await resolveWorkspaceTarget(resolvedRootPath);
     if (!workspacePath) {
       setStatus(`Cannot open in Cursor: no .code-workspace found under ${resolvedRootPath}`, "error");
       return;
     }
 
-    const command = `cursor ${JSON.stringify(workspacePath)}`;
-    const result = spawnSync(command, {
-      stdio: "inherit",
-      shell: true,
-    });
+    const result = launchBinary("cursor", [workspacePath]);
 
     if (result.error) {
       setStatus(`Failed to open Cursor: ${String(result.error)}`, "error");
@@ -495,17 +565,17 @@ function App({ onExit }: { onExit: () => void }) {
       return;
     }
 
-    const workspacePath = resolveWorkspaceTargetSync(resolvedRootPath);
+    const workspacePath = await resolveWorkspaceTarget(resolvedRootPath);
     if (!workspacePath) {
       setStatus(`Cannot inspect workspace: no .code-workspace found under ${resolvedRootPath}`, "error");
       return;
     }
 
-    const command = `${editor} ${JSON.stringify(workspacePath)}`;
-    const result = spawnSync(command, {
-      stdio: "inherit",
-      shell: true,
-    });
+    const result = launchEditorWithFile(editor, workspacePath);
+    if (!result) {
+      setStatus("Cannot inspect workspace: invalid $EDITOR command", "error");
+      return;
+    }
 
     if (result.error) {
       setStatus(`Failed to inspect workspace in editor: ${String(result.error)}`, "error");

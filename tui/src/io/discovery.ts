@@ -18,26 +18,39 @@ async function pathExists(targetPath: string): Promise<boolean> {
 
 export async function discoverWorkspaces(config: UserConfig): Promise<WorkspaceRef[]> {
   const refs = new Map<string, WorkspaceRef>();
+  let order = 0;
+  const orderedEntries = config.groups.flatMap((group) =>
+    group.paths.map((entry) => ({
+      group,
+      entry,
+      order: order++,
+      workspacePath: path.resolve(entry.path),
+    })),
+  );
 
+  const existingByPath = new Map<string, boolean>();
   await Promise.all(
-    config.groups.map(async (group) => {
-      await Promise.all(
-        group.paths.map(async (entry) => {
-          const workspacePath = path.resolve(entry.path);
-          const { group: _group, paths: _paths, ...metadata } = group;
-
-          refs.set(workspacePath, {
-            id: hashId(`${group.group}:${workspacePath}:${entry.name}`),
-            group: group.group,
-            name: entry.name,
-            path: workspacePath,
-            existsOnDisk: await pathExists(workspacePath),
-            metadata,
-          });
-        }),
-      );
+    orderedEntries.map(async (candidate) => {
+      existingByPath.set(candidate.workspacePath, await pathExists(candidate.workspacePath));
     }),
   );
+
+  orderedEntries
+    .sort((a, b) => a.order - b.order)
+    .forEach(({ group, entry, workspacePath }) => {
+      if (refs.has(workspacePath)) {
+        return;
+      }
+      const { group: _group, paths: _paths, ...metadata } = group;
+      refs.set(workspacePath, {
+        id: hashId(`${group.group}:${workspacePath}:${entry.name}`),
+        group: group.group,
+        name: entry.name,
+        path: workspacePath,
+        existsOnDisk: existingByPath.get(workspacePath) ?? false,
+        metadata,
+      });
+    });
 
   return [...refs.values()];
 }

@@ -16,11 +16,33 @@ function parseArgs(argv: string[]): ParsedArgs {
   for (let i = 0; i < rest.length; i += 1) {
     const token = rest[i];
     if (!token.startsWith("--")) {
+      throw new Error(`Unknown argument: ${token}`);
+    }
+    if (token.length === 2) {
+      throw new Error("Invalid flag '--'");
+    }
+
+    const equalIndex = token.indexOf("=");
+    if (equalIndex >= 0) {
+      const key = token.slice(2, equalIndex);
+      const value = token.slice(equalIndex + 1);
+      if (!key) {
+        throw new Error(`Invalid flag syntax: ${token}`);
+      }
+      flags.set(key, value);
       continue;
     }
+
     const key = token.slice(2);
-    const value = rest[i + 1] ?? "";
-    flags.set(key, value);
+    if (!key) {
+      throw new Error(`Invalid flag syntax: ${token}`);
+    }
+
+    const next = rest[i + 1];
+    if (next === undefined || next.startsWith("--")) {
+      throw new Error(`Missing value for --${key}`);
+    }
+    flags.set(key, next);
     i += 1;
   }
 

@@ -56,4 +56,23 @@ describe("config", () => {
     process.env[CONFIG_PATH_ENV] = configPath;
     expect(resolveConfigPath()).toBe(configPath);
   });
+
+  it("fails loudly for malformed group/path entries", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wks-conf-bad-"));
+    tmpDirs.push(root);
+    const configPath = path.join(root, "config-new.json");
+
+    await writeFile(
+      configPath,
+      JSON.stringify([
+        {
+          group: "php",
+          paths: [{ path: "/tmp/php-main" }],
+        },
+      ]),
+      "utf8",
+    );
+
+    await expect(loadConfig(configPath)).rejects.toThrow("groups[0].paths[0]");
+  });
 });

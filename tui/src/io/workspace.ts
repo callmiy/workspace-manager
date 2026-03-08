@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { applyEdits, modify, parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 import type { FolderEntry, FolderLike, SavePlan, ValidationResult, WorkspaceDoc } from "../domain/types.js";
@@ -8,6 +8,11 @@ export type WorkspaceFolderWriteEntry = {
   path: string;
   metadata?: Record<string, unknown>;
 };
+
+function buildUniqueTempPath(workspacePath: string): string {
+  const nonce = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  return `${workspacePath}.tmp.${nonce}`;
+}
 
 function getParseDiagnostics(errors: ParseError[]): string[] {
   return errors.map((error) => `${printParseErrorCode(error.error)} at offset ${error.offset}`);
@@ -32,6 +37,28 @@ async function pathExists(targetPath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function assertValidJsonc(text: string, context: string): Promise<void> {
+  const errors: ParseError[] = [];
+  parse(text, errors, JSONC_PARSE_OPTIONS);
+  if (errors.length > 0) {
+    throw new Error(`${context}: ${getParseDiagnostics(errors).join("; ")}`);
+  }
+}
+
+async function atomicWrite(workspacePath: string, content: string): Promise<void> {
+  const tmpPath = buildUniqueTempPath(workspacePath);
+  try {
+    await writeFile(tmpPath, content, "utf8");
+    await rename(tmpPath, workspacePath);
+  } finally {
+    if (await pathExists(tmpPath)) {
+      await unlink(tmpPath).catch(() => {
+        // Best-effort cleanup for failed/aborted writes.
+      });
+    }
   }
 }
 
@@ -150,6 +177,7 @@ export async function applySelection(plan: SavePlan): Promise<void> {
   });
 
   const nextText = applyEdits(rawText, edits);
+  await assertValidJsonc(nextText, "Write produced invalid JSONC");
 
   if (plan.createBackup) {
     const backupPath = `${workspacePath}.bak.${new Date().toISOString().replace(/[:.]/g, "-")}`;
@@ -157,15 +185,7 @@ export async function applySelection(plan: SavePlan): Promise<void> {
   }
 
   await mkdir(path.dirname(workspacePath), { recursive: true });
-  const tmpPath = `${workspacePath}.tmp.${process.pid}`;
-  await writeFile(tmpPath, nextText, "utf8");
-  await rename(tmpPath, workspacePath);
-
-  const validateErrors: ParseError[] = [];
-  parse(nextText, validateErrors, JSONC_PARSE_OPTIONS);
-  if (validateErrors.length > 0) {
-    throw new Error(`Write produced invalid JSONC: ${getParseDiagnostics(validateErrors).join("; ")}`);
-  }
+  await atomicWrite(workspacePath, nextText);
 }
 
 function toWorkspaceFolder(entry: WorkspaceFolderWriteEntry): Record<string, unknown> {
@@ -238,6 +258,7 @@ export async function writeWorkspaceFolders(
     getInsertionIndex: () => 0,
   });
   const nextText = applyEdits(rawText, edits);
+  await assertValidJsonc(nextText, "Write produced invalid JSONC");
 
   if (createBackup) {
     const backupPath = `${workspacePath}.bak.${new Date().toISOString().replace(/[:.]/g, "-")}`;
@@ -245,7 +266,5 @@ export async function writeWorkspaceFolders(
   }
 
   await mkdir(path.dirname(workspacePath), { recursive: true });
-  const tmpPath = `${workspacePath}.tmp.${process.pid}`;
-  await writeFile(tmpPath, nextText, "utf8");
-  await rename(tmpPath, workspacePath);
+  await atomicWrite(workspacePath, nextText);
 }

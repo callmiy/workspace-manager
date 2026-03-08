@@ -29,20 +29,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parsePaths(group: Record<string, unknown>): WorkspacePathConfig[] {
+function parsePaths(group: Record<string, unknown>, groupIndex: number): WorkspacePathConfig[] {
   const rawPaths = group.paths;
   if (!Array.isArray(rawPaths)) {
-    return [];
+    throw new Error(`Invalid config at groups[${groupIndex}].paths: expected an array`);
   }
 
-  return rawPaths.flatMap((value) => {
+  return rawPaths.map((value, pathIndex) => {
     if (!isRecord(value)) {
-      return [];
+      throw new Error(`Invalid config at groups[${groupIndex}].paths[${pathIndex}]: expected an object`);
     }
     if (typeof value.path !== "string" || typeof value.name !== "string") {
-      return [];
+      throw new Error(
+        `Invalid config at groups[${groupIndex}].paths[${pathIndex}]: expected string 'name' and 'path'`,
+      );
     }
-    return [{ path: value.path, name: value.name }];
+    return { path: value.path, name: value.name };
   });
 }
 
@@ -51,20 +53,20 @@ function toConfigGroups(input: unknown): WorkspaceGroup[] {
     throw new Error("Config root must be an array of groups");
   }
 
-  return input.flatMap((value) => {
+  return input.map((value, groupIndex) => {
     if (!isRecord(value)) {
-      return [];
+      throw new Error(`Invalid config at groups[${groupIndex}]: expected an object`);
     }
     if (typeof value.group !== "string") {
-      return [];
+      throw new Error(`Invalid config at groups[${groupIndex}].group: expected a string`);
     }
 
-    const paths = parsePaths(value);
+    const paths = parsePaths(value, groupIndex);
     if (paths.length === 0) {
-      return [];
+      throw new Error(`Invalid config at groups[${groupIndex}].paths: expected at least one path entry`);
     }
 
-    return [{ ...value, group: value.group, paths }];
+    return { ...value, group: value.group, paths };
   });
 }
 
