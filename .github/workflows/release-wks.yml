@@ -25,9 +25,6 @@ jobs:
           - os: ubuntu-latest
             target: bun-linux-x64
             asset: linux-x64
-          - os: macos-13
-            target: bun-darwin-x64
-            asset: darwin-x64
           - os: macos-14
             target: bun-darwin-arm64
             asset: darwin-arm64

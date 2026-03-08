@@ -35,7 +35,6 @@ After linking, `_wks` is available on your PATH.
 GitHub Actions publishes these binary archives per release tag:
 
 - `_wks-linux-x64.tar.gz`
-- `_wks-darwin-x64.tar.gz`
 - `_wks-darwin-arm64.tar.gz`
 
 ## Config
