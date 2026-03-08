@@ -4,6 +4,22 @@
 
 ## Install
 
+### Public binary (no clone)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/callmiy/workspace-manager/main/tui/scripts/install.sh | bash
+```
+
+Optional environment overrides:
+
+```bash
+WKS_VERSION=v0.1.0 WKS_BIN_DIR="$HOME/.local/bin" bash tui/scripts/install.sh
+```
+
+The installer downloads a release asset for your platform and installs `_wks` to `~/.local/bin` by default.
+
+### From source
+
 ```bash
 cd tui
 npm install
@@ -13,6 +29,14 @@ npm link
 
 After linking, `_wks` is available on your PATH.
 `bun` must be installed because OpenTUI depends on Bun runtime modules.
+
+### Release assets
+
+GitHub Actions publishes these binary archives per release tag:
+
+- `_wks-linux-x64.tar.gz`
+- `_wks-darwin-x64.tar.gz`
+- `_wks-darwin-arm64.tar.gz`
 
 ## Config
 

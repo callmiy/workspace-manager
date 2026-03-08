@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:binary": "bun build --compile --outfile ./bin/_wks ./src/cli/index.ts",
     "dev": "bun run src/cli/index.ts",
     "start": "bun run dist/cli/index.js",
     "test": "npm run test:unit",
