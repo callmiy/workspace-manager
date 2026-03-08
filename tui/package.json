@@ -1,0 +1,28 @@
+{
+  "name": "workspace-manager-tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "_wks": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "bun run src/cli/index.ts",
+    "start": "bun run dist/cli/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.84",
+    "@opentui/react": "^0.1.84",
+    "jsonc-parser": "^3.3.1",
+    "react": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.10",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

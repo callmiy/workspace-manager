@@ -1,0 +1,820 @@
+import * as OpenTuiCore from "@opentui/core";
+import * as OpenTuiReact from "@opentui/react";
+import { spawnSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { useEffect, useMemo, useState } from "react";
+import type { UserConfig, WorkspaceRef } from "../domain/types.js";
+import { defaultConfig, ensureConfigDir, loadConfig, resolveConfigPath } from "../config/config.js";
+import { discoverWorkspaces } from "../io/discovery.js";
+import { resolveWorkspaceTarget, writeWorkspaceFolders } from "../io/workspace.js";
+
+type Screen = "roots" | "associate" | "save";
+type MessageTone = "info" | "success" | "error";
+
+type KeyboardEventLike = {
+  name: string;
+  ctrl: boolean;
+  sequence: string;
+};
+
+const createCliRenderer = (
+  OpenTuiCore as unknown as { createCliRenderer: (options?: Record<string, unknown>) => Promise<unknown> }
+).createCliRenderer;
+const createRoot = (
+  OpenTuiReact as unknown as {
+    createRoot: (renderer: unknown) => { render: (node: unknown) => void; unmount: () => void };
+  }
+).createRoot;
+const useKeyboard = (
+  OpenTuiReact as unknown as { useKeyboard: (handler: (key: KeyboardEventLike) => void) => void }
+).useKeyboard;
+
+const KEYMAP_TEXT_FG = "#7dd3fc";
+const KEYMAP_DELIMITER_FG = "#64748b";
+const ROW_ACTIVE_BG = "#1d4ed8";
+const ROW_ACTIVE_FG = "#f8fafc";
+const ROW_SELECTED_BG = "#166534";
+const ROW_SELECTED_ACTIVE_BG = "#15803d";
+
+function linePrefix(active: boolean): string {
+  return active ? ">" : " ";
+}
+
+function isPrintableKey(sequence: string): boolean {
+  return sequence.length === 1 && sequence >= " " && sequence <= "~";
+}
+
+function isQuestionKey(key: KeyboardEventLike): boolean {
+  return key.name === "?" || key.sequence === "?";
+}
+
+function fuzzyScore(candidate: string, query: string): number | null {
+  const haystack = candidate.toLowerCase();
+  const needle = query.toLowerCase().trim();
+  if (!needle) {
+    return 0;
+  }
+
+  let needleIndex = 0;
+  let score = 0;
+  let lastMatchIndex = -1;
+
+  for (let i = 0; i < haystack.length && needleIndex < needle.length; i += 1) {
+    if (haystack[i] === needle[needleIndex]) {
+      score += lastMatchIndex + 1 === i ? 3 : 1;
+      lastMatchIndex = i;
+      needleIndex += 1;
+    }
+  }
+
+  if (needleIndex !== needle.length) {
+    return null;
+  }
+
+  if (haystack.includes(needle)) {
+    score += 8;
+  }
+
+  return score - haystack.length / 10000;
+}
+
+function workspaceLabel(workspace: WorkspaceRef): string {
+  return `${workspace.name}: ${workspace.path} [${workspace.existsOnDisk ? "exists" : "missing"}]`;
+}
+
+function getRowMaxWidth(): number {
+  const cols = process.stdout.columns ?? 100;
+  return Math.max(24, cols - 12);
+}
+
+function getOuterLineMaxWidth(): number {
+  const cols = process.stdout.columns ?? 100;
+  return Math.max(20, cols - 12);
+}
+
+function getPreviewLineMaxWidth(): number {
+  const cols = process.stdout.columns ?? 100;
+  return Math.max(16, cols - 16);
+}
+
+function getPreviewMaxLines(): number {
+  const rows = process.stdout.rows ?? 40;
+  return Math.max(4, rows - 16);
+}
+
+function clampLine(text: string, maxWidth: number): string {
+  if (text.length <= maxWidth) {
+    return text;
+  }
+  if (maxWidth <= 1) {
+    return text.slice(0, maxWidth);
+  }
+  return `${text.slice(0, maxWidth - 1)}…`;
+}
+
+function fitLine(text: string, maxWidth: number): string {
+  return clampLine(text, maxWidth).padEnd(maxWidth, " ");
+}
+
+function lowerCaseWorkspaceFilename(name: string): string {
+  return `${name.toLowerCase()}.code-workspace`;
+}
+
+function resolveWorkspaceTargetSync(rootWorkspacePath: string): string | null {
+  const root = path.resolve(rootWorkspacePath);
+  const scan = (dir: string): string[] => {
+    if (!existsSync(dir)) {
+      return [];
+    }
+    try {
+      return readdirSync(dir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".code-workspace"))
+        .map((entry) => path.resolve(dir, entry.name))
+        .sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
+    } catch {
+      return [];
+    }
+  };
+
+  const rootMatches = scan(root);
+  if (rootMatches.length > 0) {
+    return rootMatches[0] ?? null;
+  }
+
+  const vscodeMatches = scan(path.join(root, ".vscode"));
+  return vscodeMatches[0] ?? null;
+}
+
+function buildFolderObjects(root: WorkspaceRef, associates: WorkspaceRef[]): Record<string, unknown>[] {
+  return [root, ...associates].map((workspace) => ({
+    name: workspace.name,
+    path: workspace.path,
+    ...workspace.metadata,
+  }));
+}
+
+function KeymapLine({ hints }: { hints: string[] }) {
+  return (
+    <box style={{ flexDirection: "row", flexWrap: "wrap", width: "100%" }}>
+      {hints.map((hint, index) => (
+        <text fg={KEYMAP_TEXT_FG} key={`${hint}-${index}`}>
+          {hint}
+          {index < hints.length - 1 ? <span fg={KEYMAP_DELIMITER_FG}> | </span> : ""}
+        </text>
+      ))}
+    </box>
+  );
+}
+
+function App({ onExit }: { onExit: () => void }) {
+  const rowMaxWidth = getRowMaxWidth();
+  const outerLineMaxWidth = getOuterLineMaxWidth();
+  const previewLineMaxWidth = getPreviewLineMaxWidth();
+  const previewMaxLines = getPreviewMaxLines();
+  const [screen, setScreen] = useState<Screen>("roots");
+  const [config, setConfig] = useState<UserConfig>(defaultConfig());
+  const [workspaces, setWorkspaces] = useState<WorkspaceRef[]>([]);
+  const [selectedRootIndex, setSelectedRootIndex] = useState(0);
+  const [rootSearch, setRootSearch] = useState("");
+  const [rootSearchMode, setRootSearchMode] = useState(false);
+  const [selectedRoot, setSelectedRoot] = useState<WorkspaceRef | null>(null);
+  const [selectedAssociateIndex, setSelectedAssociateIndex] = useState(0);
+  const [selectedAssociatePaths, setSelectedAssociatePaths] = useState<Set<string>>(new Set());
+  const [associateSearch, setAssociateSearch] = useState("");
+  const [associateSearchMode, setAssociateSearchMode] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<MessageTone>("info");
+  const [showKeymaps, setShowKeymaps] = useState(true);
+  const [renderEpoch, setRenderEpoch] = useState(0);
+  const messageFg =
+    messageTone === "error" ? "#f87171" : messageTone === "success" ? "#4ade80" : undefined;
+
+  function setStatus(nextMessage: string, tone: MessageTone = "info"): void {
+    setMessage(nextMessage);
+    setMessageTone(tone);
+  }
+
+  async function refreshWorkspaces(): Promise<void> {
+    const configPath = resolveConfigPath();
+    setIsRefreshing(true);
+
+    try {
+      const loadedConfig = await loadConfig(configPath);
+      const refs = await discoverWorkspaces(loadedConfig);
+      setConfig(loadedConfig);
+      setWorkspaces(refs);
+      setSelectedRootIndex(0);
+      if (refs.length === 0) {
+        setStatus(`No root workspaces found in ${configPath}`);
+      }
+    } catch (error: unknown) {
+      setConfig(defaultConfig());
+      setWorkspaces([]);
+      setSelectedRootIndex(0);
+      setStatus(`Failed to load config ${configPath}: ${String(error)}`, "error");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshWorkspaces().catch((error: unknown) => {
+      setStatus(`Failed to discover workspaces: ${String(error)}`, "error");
+    });
+  }, []);
+
+  const filteredRoots = useMemo(() => {
+    const term = rootSearch.trim();
+    if (!term) {
+      return workspaces;
+    }
+
+    return workspaces
+      .map((workspace) => ({
+        workspace,
+        score: fuzzyScore(`${workspace.name} ${workspace.path}`, term),
+      }))
+      .filter((item): item is { workspace: WorkspaceRef; score: number } => item.score !== null)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.workspace);
+  }, [rootSearch, workspaces]);
+
+  const associateCandidates = useMemo(() => {
+    if (!selectedRoot) {
+      return [];
+    }
+
+    return workspaces.filter((workspace) => workspace.group !== selectedRoot.group && workspace.path !== selectedRoot.path);
+  }, [selectedRoot, workspaces]);
+
+  const filteredAssociates = useMemo(() => {
+    const term = associateSearch.trim();
+    if (!term) {
+      return associateCandidates;
+    }
+
+    return associateCandidates
+      .map((workspace) => ({
+        workspace,
+        score: fuzzyScore(`${workspace.name} ${workspace.path} ${workspace.group}`, term),
+      }))
+      .filter((item): item is { workspace: WorkspaceRef; score: number } => item.score !== null)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.workspace);
+  }, [associateCandidates, associateSearch]);
+
+  const selectedAssociates = useMemo(
+    () => associateCandidates.filter((workspace) => selectedAssociatePaths.has(workspace.path)),
+    [associateCandidates, selectedAssociatePaths],
+  );
+
+  const previewFolders = useMemo(() => {
+    if (!selectedRoot) {
+      return [];
+    }
+    return buildFolderObjects(selectedRoot, selectedAssociates);
+  }, [selectedRoot, selectedAssociates]);
+
+  const previewJson = useMemo(() => JSON.stringify({ folders: previewFolders }, null, 2), [previewFolders]);
+  const previewLines = useMemo(() => {
+    const lines = previewJson.split("\n");
+    if (lines.length <= previewMaxLines) {
+      return lines;
+    }
+    const kept = lines.slice(0, Math.max(1, previewMaxLines - 1));
+    kept.push(`… (${lines.length - kept.length} more lines)`);
+    return kept;
+  }, [previewJson, previewMaxLines]);
+  const previewTargetPath = useMemo(() => {
+    if (!selectedRoot) {
+      return "";
+    }
+    return resolveWorkspaceTargetSync(selectedRoot.path) ?? path.join(selectedRoot.path, lowerCaseWorkspaceFilename(selectedRoot.name));
+  }, [selectedRoot]);
+
+  useEffect(() => {
+    if (screen !== "roots") {
+      return;
+    }
+    if (selectedRootIndex >= filteredRoots.length) {
+      setSelectedRootIndex(Math.max(0, filteredRoots.length - 1));
+    }
+  }, [filteredRoots.length, selectedRootIndex, screen]);
+
+  useEffect(() => {
+    if (screen !== "associate") {
+      return;
+    }
+    if (selectedAssociateIndex >= filteredAssociates.length) {
+      setSelectedAssociateIndex(Math.max(0, filteredAssociates.length - 1));
+    }
+  }, [filteredAssociates.length, selectedAssociateIndex, screen]);
+
+  function resetAssociateState(): void {
+    setSelectedAssociateIndex(0);
+    setSelectedAssociatePaths(new Set());
+    setAssociateSearch("");
+    setAssociateSearchMode(false);
+    setStatus("");
+  }
+
+  async function openSelectedRoot(): Promise<void> {
+    const root = filteredRoots[selectedRootIndex];
+    if (!root) {
+      return;
+    }
+
+    setSelectedRoot(root);
+    resetAssociateState();
+    setScreen("associate");
+    setStatus("");
+  }
+
+  function toggleCurrentAssociate(): void {
+    const current = filteredAssociates[selectedAssociateIndex];
+    if (!current) {
+      return;
+    }
+
+    setSelectedAssociatePaths((currentSelection) => {
+      const next = new Set(currentSelection);
+      if (next.has(current.path)) {
+        next.delete(current.path);
+        return next;
+      }
+
+      const hasGroupAlready = associateCandidates.some(
+        (candidate) => candidate.group === current.group && next.has(candidate.path),
+      );
+      if (hasGroupAlready) {
+        setStatus(`Group '${current.group}' already has a selected workspace`, "error");
+        return next;
+      }
+
+      next.add(current.path);
+      setStatus("");
+      return next;
+    });
+  }
+
+  function selectAssociatesAll(value: boolean): void {
+    if (!value) {
+      setSelectedAssociatePaths(new Set());
+      return;
+    }
+
+    const groupFirst = new Map<string, string>();
+    associateCandidates.forEach((candidate) => {
+      if (!groupFirst.has(candidate.group)) {
+        groupFirst.set(candidate.group, candidate.path);
+      }
+    });
+
+    setSelectedAssociatePaths(new Set(groupFirst.values()));
+  }
+
+  async function saveSelection(): Promise<void> {
+    if (!selectedRoot) {
+      return;
+    }
+
+    const folders = previewFolders.map((entry) => {
+      const { name, path: folderPath, ...metadata } = entry;
+      return {
+        name: String(name),
+        path: String(folderPath),
+        metadata,
+      };
+    });
+
+    try {
+      const existingTarget = await resolveWorkspaceTarget(selectedRoot.path);
+      const targetPath = existingTarget ?? path.join(selectedRoot.path, lowerCaseWorkspaceFilename(selectedRoot.name));
+
+      await writeWorkspaceFolders(targetPath, folders, false);
+
+      setScreen("roots");
+      setSelectedRoot(null);
+      setRootSearch("");
+      setRootSearchMode(false);
+      await refreshWorkspaces();
+      setStatus(`Saved ${folders.length} folder(s) to ${targetPath}`, "success");
+    } catch (error: unknown) {
+      setStatus(`Save failed: ${String(error)}`, "error");
+      setScreen("associate");
+    }
+  }
+
+  async function openConfigInEditor(): Promise<void> {
+    const editor = process.env.EDITOR;
+    if (!editor) {
+      setStatus("Cannot open config: $EDITOR is not set", "error");
+      return;
+    }
+
+    const configPath = resolveConfigPath();
+    await ensureConfigDir(configPath);
+    const command = `${editor} ${JSON.stringify(configPath)}`;
+    const result = spawnSync(command, {
+      stdio: "inherit",
+      shell: true,
+    });
+
+    if (result.error) {
+      setStatus(`Failed to open config in editor: ${String(result.error)}`, "error");
+      return;
+    }
+
+    if (typeof result.status === "number" && result.status !== 0) {
+      setStatus(`Editor exited with status ${result.status}`, "error");
+      return;
+    }
+
+    // Returning from a full-screen editor can leave stale terminal state.
+    // Force a hard clear and remount cycle so OpenTUI repaints cleanly.
+    process.stdout.write("\x1b[2J\x1b[H");
+    setRenderEpoch((value) => value + 1);
+    await refreshWorkspaces();
+    setStatus(`Config opened: ${configPath}`);
+  }
+
+  async function openSelectedRootInCursor(): Promise<void> {
+    const root = filteredRoots[selectedRootIndex];
+    if (!root) {
+      return;
+    }
+
+    const resolvedRootPath = path.resolve(root.path);
+    if (!existsSync(resolvedRootPath)) {
+      setStatus(`Cannot open in Cursor: folder does not exist: ${resolvedRootPath}`, "error");
+      return;
+    }
+
+    const workspacePath = resolveWorkspaceTargetSync(resolvedRootPath);
+    if (!workspacePath) {
+      setStatus(`Cannot open in Cursor: no .code-workspace found under ${resolvedRootPath}`, "error");
+      return;
+    }
+
+    const command = `cursor ${JSON.stringify(workspacePath)}`;
+    const result = spawnSync(command, {
+      stdio: "inherit",
+      shell: true,
+    });
+
+    if (result.error) {
+      setStatus(`Failed to open Cursor: ${String(result.error)}`, "error");
+      return;
+    }
+
+    if (typeof result.status === "number" && result.status !== 0) {
+      setStatus(`Cursor exited with status ${result.status}`, "error");
+      return;
+    }
+
+    setStatus(`Opened in Cursor: ${workspacePath}`, "success");
+  }
+
+  async function openSelectedRootInEditor(): Promise<void> {
+    const root = filteredRoots[selectedRootIndex];
+    if (!root) {
+      return;
+    }
+
+    const editor = process.env.EDITOR;
+    if (!editor) {
+      setStatus("Cannot inspect workspace: $EDITOR is not set", "error");
+      return;
+    }
+
+    const resolvedRootPath = path.resolve(root.path);
+    if (!existsSync(resolvedRootPath)) {
+      setStatus(`Cannot inspect workspace: folder does not exist: ${resolvedRootPath}`, "error");
+      return;
+    }
+
+    const workspacePath = resolveWorkspaceTargetSync(resolvedRootPath);
+    if (!workspacePath) {
+      setStatus(`Cannot inspect workspace: no .code-workspace found under ${resolvedRootPath}`, "error");
+      return;
+    }
+
+    const command = `${editor} ${JSON.stringify(workspacePath)}`;
+    const result = spawnSync(command, {
+      stdio: "inherit",
+      shell: true,
+    });
+
+    if (result.error) {
+      setStatus(`Failed to inspect workspace in editor: ${String(result.error)}`, "error");
+      return;
+    }
+
+    if (typeof result.status === "number" && result.status !== 0) {
+      setStatus(`Editor exited with status ${result.status}`, "error");
+      return;
+    }
+
+    process.stdout.write("\x1b[2J\x1b[H");
+    setRenderEpoch((value) => value + 1);
+    setStatus(`Inspected in editor: ${workspacePath}`, "success");
+  }
+
+  useKeyboard((key) => {
+    if (rootSearchMode && screen === "roots") {
+      if (key.name === "escape" || key.name === "return") {
+        setRootSearchMode(false);
+        return;
+      }
+      if (key.name === "backspace") {
+        setRootSearch((current) => current.slice(0, -1));
+        return;
+      }
+      if (isPrintableKey(key.sequence)) {
+        setRootSearch((current) => `${current}${key.sequence}`);
+      }
+      return;
+    }
+
+    if (associateSearchMode && screen === "associate") {
+      if (key.name === "escape" || key.name === "return") {
+        setAssociateSearchMode(false);
+        return;
+      }
+      if (key.name === "backspace") {
+        setAssociateSearch((current) => current.slice(0, -1));
+        return;
+      }
+      if (isPrintableKey(key.sequence)) {
+        setAssociateSearch((current) => `${current}${key.sequence}`);
+      }
+      return;
+    }
+
+    if ((key.ctrl && key.name === "c") || key.name === "q") {
+      onExit();
+      return;
+    }
+    if (isQuestionKey(key)) {
+      setShowKeymaps((current) => !current);
+      return;
+    }
+    if (key.name === "o") {
+      void openConfigInEditor();
+      return;
+    }
+
+    if (screen === "roots") {
+      if (key.name === "j" || key.name === "down") {
+        setSelectedRootIndex((current) => Math.min(current + 1, Math.max(0, filteredRoots.length - 1)));
+      }
+      if (key.name === "k" || key.name === "up") {
+        setSelectedRootIndex((current) => Math.max(current - 1, 0));
+      }
+      if (key.name === "return") {
+        void openSelectedRoot();
+      }
+      if (key.name === "r") {
+        void refreshWorkspaces();
+      }
+      if (key.name === "c") {
+        void openSelectedRootInCursor();
+      }
+      if (key.name === "i") {
+        void openSelectedRootInEditor();
+      }
+      if (key.name === "slash" || key.name === "/" || key.sequence === "/") {
+        setRootSearchMode(true);
+      }
+      if (key.name === "escape" && rootSearch) {
+        setRootSearch("");
+        setSelectedRootIndex(0);
+      }
+      return;
+    }
+
+    if (screen === "associate") {
+      if (key.name === "j" || key.name === "down") {
+        setSelectedAssociateIndex((current) => Math.min(current + 1, Math.max(0, filteredAssociates.length - 1)));
+      }
+      if (key.name === "k" || key.name === "up") {
+        setSelectedAssociateIndex((current) => Math.max(current - 1, 0));
+      }
+      if (key.name === "space") {
+        toggleCurrentAssociate();
+      }
+      if (key.name === "a") {
+        selectAssociatesAll(true);
+      }
+      if (key.name === "n") {
+        selectAssociatesAll(false);
+      }
+      if (key.name === "s" || key.name === "return") {
+        if (selectedAssociatePaths.size === 0) {
+          setStatus("Select at least one associate workspace before saving", "error");
+          return;
+        }
+        setStatus("");
+        setScreen("save");
+      }
+      if (key.name === "slash" || key.name === "/" || key.sequence === "/") {
+        setAssociateSearchMode(true);
+      }
+      if (key.name === "escape") {
+        setScreen("roots");
+        setSelectedRoot(null);
+        setStatus("");
+      }
+      return;
+    }
+
+    if (screen === "save") {
+      if (key.name === "return" || key.name === "y") {
+        void saveSelection();
+      }
+      if (key.name === "escape" || key.name === "n") {
+        setScreen("associate");
+        setStatus("");
+      }
+    }
+  });
+
+  if (screen === "roots") {
+    const keyHints = [
+      "j/k move",
+      "Enter open",
+      "/ search",
+      "r refresh",
+      "c cursor",
+      "i inspect",
+      "o config",
+      "? keymaps",
+      "q quit",
+    ];
+
+    return (
+      <box key={`roots-screen-${renderEpoch}`} style={{ flexDirection: "column", paddingTop: 1 }}>
+        <box
+          border
+          title="Root Workspace"
+          style={{
+            flexDirection: "column",
+            margin: 0,
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+          }}
+        >
+          <text>{fitLine(`Configured groups: ${config.groups.length}`, outerLineMaxWidth)}</text>
+          {rootSearchMode || rootSearch ? (
+            <text>
+              {fitLine(`Search: ${rootSearchMode ? "(typing...)" : ""} ${rootSearch}`.trimEnd(), outerLineMaxWidth)}
+            </text>
+          ) : null}
+          <box
+            style={{
+              flexDirection: "column",
+              padding: 0,
+              marginTop: 1,
+              flexGrow: 1,
+            }}
+          >
+            {filteredRoots.map((workspace, index) => (
+              <text
+                key={workspace.id}
+                bg={index === selectedRootIndex ? ROW_ACTIVE_BG : undefined}
+                fg={index === selectedRootIndex ? ROW_ACTIVE_FG : undefined}
+              >
+                {fitLine(`${linePrefix(index === selectedRootIndex)} ${workspaceLabel(workspace)}`, rowMaxWidth)}
+              </text>
+            ))}
+            {workspaces.length === 0 ? <text>No root workspaces available.</text> : null}
+            {workspaces.length > 0 && filteredRoots.length === 0 ? <text>No root workspaces match the current search.</text> : null}
+          </box>
+          <text fg={messageFg}>{fitLine(isRefreshing ? "Loading workspaces..." : message, outerLineMaxWidth)}</text>
+          {showKeymaps ? <KeymapLine hints={keyHints} /> : null}
+        </box>
+      </box>
+    );
+  }
+
+  if (screen === "save") {
+    const total = 1 + selectedAssociates.length;
+    const keyHints = ["Enter/y yes", "Esc/n no", "o config", "? keymaps"];
+
+    return (
+      <box key={`save-screen-${renderEpoch}`} style={{ flexDirection: "column", paddingTop: 1 }}>
+        <box
+          border
+          title="Save Preview"
+          style={{
+            flexDirection: "column",
+            margin: 0,
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+          }}
+        >
+          <text>{fitLine(`Root: ${selectedRoot ? workspaceLabel(selectedRoot) : ""}`, outerLineMaxWidth)}</text>
+          <text>{fitLine(`Target: ${previewTargetPath}`, outerLineMaxWidth)}</text>
+          <text>{fitLine(`Associates: ${selectedAssociates.length}`, outerLineMaxWidth)}</text>
+          <text>{fitLine(`Folders to write: ${total}`, outerLineMaxWidth)}</text>
+          <text>{fitLine("Confirm save?", outerLineMaxWidth)}</text>
+          <box style={{ flexDirection: "column", padding: 1, marginTop: 1, flexGrow: 1 }}>
+            {previewLines.map((line, index) => (
+              <text key={`preview-${index}`}>{fitLine(line, previewLineMaxWidth)}</text>
+            ))}
+          </box>
+          <text fg={messageFg}>{fitLine(message, outerLineMaxWidth)}</text>
+          {showKeymaps ? <KeymapLine hints={keyHints} /> : null}
+        </box>
+      </box>
+    );
+  }
+
+  const associateKeyHints = [
+    "j/k move",
+    "space toggle",
+    "a/n all-none",
+    "/ search",
+    "s save",
+    "esc back",
+    "o config",
+    "? keymaps",
+    "q quit",
+  ];
+
+  return (
+    <box key={`associate-screen-${renderEpoch}`} style={{ flexDirection: "column", paddingTop: 1 }}>
+      <box
+        border
+        title="Associate Workspaces"
+        style={{
+          flexDirection: "column",
+          margin: 0,
+          paddingTop: 0,
+          paddingRight: 0,
+          paddingBottom: 0,
+          paddingLeft: 0,
+        }}
+      >
+        <text>{fitLine(selectedRoot ? workspaceLabel(selectedRoot) : "", outerLineMaxWidth)}</text>
+        {associateSearchMode || associateSearch ? (
+          <text>
+            {fitLine(
+              `Search: ${associateSearchMode ? "(typing...)" : ""} ${associateSearch}`.trimEnd(),
+              outerLineMaxWidth,
+            )}
+          </text>
+        ) : null}
+        <box style={{ flexDirection: "column", padding: 0, marginTop: 1, flexGrow: 1 }}>
+          {filteredAssociates.map((workspace, index) => (
+            <text
+              key={workspace.id}
+              bg={
+                selectedAssociatePaths.has(workspace.path)
+                  ? index === selectedAssociateIndex
+                    ? ROW_SELECTED_ACTIVE_BG
+                    : ROW_SELECTED_BG
+                  : index === selectedAssociateIndex
+                    ? ROW_ACTIVE_BG
+                    : undefined
+              }
+              fg={index === selectedAssociateIndex ? ROW_ACTIVE_FG : undefined}
+            >
+              {fitLine(
+                `${linePrefix(index === selectedAssociateIndex)} [${selectedAssociatePaths.has(workspace.path) ? "x" : " "}] ${workspaceLabel(workspace)}`,
+                rowMaxWidth,
+              )}
+            </text>
+          ))}
+          {associateCandidates.length === 0 ? <text>No available associates for this root.</text> : null}
+          {associateCandidates.length > 0 && filteredAssociates.length === 0 ? (
+            <text>No associate workspaces match the current search.</text>
+          ) : null}
+        </box>
+        <text fg={messageFg}>{fitLine(message, outerLineMaxWidth)}</text>
+        {showKeymaps ? <KeymapLine hints={associateKeyHints} /> : null}
+      </box>
+    </box>
+  );
+}
+
+export async function runTui(): Promise<void> {
+  const renderer = (await createCliRenderer({
+    exitOnCtrlC: false,
+  })) as { destroy: () => void };
+  const root = createRoot(renderer);
+
+  function exitTui(): void {
+    root.unmount();
+    renderer.destroy();
+    process.stdout.write("\x1b[2J\x1b[H\x1b[0m");
+  }
+
+  root.render(<App onExit={exitTui} />);
+}
