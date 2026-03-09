@@ -692,10 +692,6 @@ function App({ onExit }: { onExit: () => void }) {
         selectAssociatesAll(false);
       }
       if (key.name === "s" || key.name === "return") {
-        if (selectedAssociatePaths.size === 0) {
-          setStatus("Select at least one associate workspace before saving", "error");
-          return;
-        }
         setStatus("");
         setScreen("save");
       }
@@ -809,6 +805,9 @@ function App({ onExit }: { onExit: () => void }) {
               <text key={`preview-${index}`}>{fitLine(line, previewLineMaxWidth)}</text>
             ))}
           </box>
+          {selectedAssociates.length === 0 ? (
+            <text fg="#f59e0b">{fitLine("Warning: no associate workspaces selected; only root workspace will be saved", outerLineMaxWidth)}</text>
+          ) : null}
           <text fg={messageFg}>{fitLine(message, outerLineMaxWidth)}</text>
           {showKeymaps ? <KeymapLine hints={keyHints} /> : null}
         </box>
