@@ -117,6 +117,15 @@ function fitLine(text: string, maxWidth: number): string {
   return clampLine(text, maxWidth).padEnd(maxWidth, " ");
 }
 
+function findWorkspaceIndexByPath(workspaces: WorkspaceRef[], workspacePath: string | null): number {
+  if (!workspacePath) {
+    return 0;
+  }
+
+  const index = workspaces.findIndex((workspace) => workspace.path === workspacePath);
+  return index >= 0 ? index : 0;
+}
+
 function lowerCaseWorkspaceFilename(name: string): string {
   return `${name.toLowerCase()}.code-workspace`;
 }
@@ -230,6 +239,7 @@ function App({ onExit }: { onExit: () => void }) {
   const [rootSearch, setRootSearch] = useState("");
   const [rootSearchMode, setRootSearchMode] = useState(false);
   const [selectedRoot, setSelectedRoot] = useState<WorkspaceRef | null>(null);
+  const [rememberedRootPath, setRememberedRootPath] = useState<string | null>(null);
   const [selectedAssociateIndex, setSelectedAssociateIndex] = useState(0);
   const [selectedAssociatePaths, setSelectedAssociatePaths] = useState<Set<string>>(new Set());
   const [associateSearch, setAssociateSearch] = useState("");
@@ -264,7 +274,7 @@ function App({ onExit }: { onExit: () => void }) {
       }
       setConfig(loadedConfig);
       setWorkspaces(refs);
-      setSelectedRootIndex(0);
+      setSelectedRootIndex(findWorkspaceIndexByPath(refs, rememberedRootPath));
       if (refs.length === 0) {
         setStatus(`No root workspaces found in ${configPath}`);
       }
@@ -408,6 +418,7 @@ function App({ onExit }: { onExit: () => void }) {
     }
 
     setSelectedRoot(root);
+    setRememberedRootPath(root.path);
     resetAssociateState();
     setScreen("associate");
     setStatus("");
@@ -481,6 +492,7 @@ function App({ onExit }: { onExit: () => void }) {
       setSelectedRoot(null);
       setRootSearch("");
       setRootSearchMode(false);
+      setSelectedRootIndex(findWorkspaceIndexByPath(workspaces, selectedRoot.path));
       await refreshWorkspaces();
       setStatus(`Saved ${folders.length} folder(s) to ${targetPath}`, "success");
     } catch (error: unknown) {

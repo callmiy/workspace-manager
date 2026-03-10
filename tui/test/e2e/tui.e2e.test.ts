@@ -223,6 +223,87 @@ describe("tui e2e", () => {
   );
 
   it(
+    "returns to the originally selected root after saving",
+    async () => {
+      const fixture = await setupFixture();
+      const alphaRootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      const betaRootPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp");
+      await createWorkspaceDir(fixture.rootDir, "services/frontend");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "alpha",
+          paths: [{ name: "ALPHA-M", path: alphaRootPath }],
+        },
+        {
+          group: "beta",
+          paths: [{ name: "BETA-M", path: betaRootPath }],
+        },
+        {
+          group: "frontend",
+          paths: [{ name: "FRONTEND-M", path: path.join(fixture.rootDir, "services/frontend") }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("j");
+      await harness.waitForText("> BETA-M: ");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKey("Enter");
+
+      const targetWorkspacePath = path.join(betaRootPath, "beta-m.code-workspace");
+      await harness.waitForText(`Saved 1 folder(s) to ${targetWorkspacePath}`);
+      await harness.waitForText("Root Workspace");
+      expect(harness.capture()).toContain("> BETA-M: ");
+    },
+    20_000,
+  );
+
+  it(
+    "returns to the originally selected root after backing out from save preview",
+    async () => {
+      const fixture = await setupFixture();
+      const alphaRootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      const betaRootPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp");
+      await createWorkspaceDir(fixture.rootDir, "services/frontend");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "alpha",
+          paths: [{ name: "ALPHA-M", path: alphaRootPath }],
+        },
+        {
+          group: "beta",
+          paths: [{ name: "BETA-M", path: betaRootPath }],
+        },
+        {
+          group: "frontend",
+          paths: [{ name: "FRONTEND-M", path: path.join(fixture.rootDir, "services/frontend") }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("j");
+      await harness.waitForText("> BETA-M: ");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKey("Escape");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKey("Escape");
+      await harness.waitForText("Root Workspace");
+      expect(harness.capture()).toContain("> BETA-M: ");
+    },
+    20_000,
+  );
+
+  it(
     "stubs editor and cursor launches and returns to a valid UI state",
     async () => {
       const fixture = await setupFixture();
