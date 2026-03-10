@@ -191,7 +191,7 @@ describe("tui e2e", () => {
   );
 
   it(
-    "keeps the user on associates when save is attempted without selections",
+    "allows save preview without associates and shows a warning",
     async () => {
       const fixture = await setupFixture();
       const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
@@ -214,9 +214,10 @@ describe("tui e2e", () => {
       await harness.waitForText("Associate Workspaces");
       harness.sendKey("Enter");
 
-      await harness.waitForText("Select at least one associate workspace before saving");
-      expect(harness.capture()).toContain("Associate Workspaces");
-      expect(harness.capture()).not.toContain("Save Preview");
+      await harness.waitForText("Save Preview");
+      await harness.waitForText("Associates: 0");
+      await harness.waitForText("Folders to write: 1");
+      await harness.waitForText("Warning: no associate workspaces selected; only root workspace will be saved");
     },
     20_000,
   );
