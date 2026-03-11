@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { UserConfig, WorkspaceRef } from "../domain/types.js";
 import { defaultConfig, ensureConfigDir, loadConfig, resolveConfigPath } from "../config/config.js";
 import { discoverWorkspaces } from "../io/discovery.js";
-import { resolveWorkspaceTarget, writeWorkspaceFolders } from "../io/workspace.js";
+import { loadWorkspace, resolveWorkspaceTarget, writeWorkspaceFolders } from "../io/workspace.js";
 
 type Screen = "roots" | "associate" | "save";
 type MessageTone = "info" | "success" | "error";
@@ -214,6 +214,23 @@ function buildFolderObjects(root: WorkspaceRef, associates: WorkspaceRef[]): Rec
   }));
 }
 
+function buildPreselectedAssociatePaths(root: WorkspaceRef, candidates: WorkspaceRef[], folderPaths: string[]): Set<string> {
+  const preselected = new Set<string>();
+  const seenGroups = new Set<string>();
+  const folderPathSet = new Set(folderPaths);
+
+  candidates.forEach((candidate) => {
+    if (candidate.path === root.path || seenGroups.has(candidate.group) || !folderPathSet.has(candidate.path)) {
+      return;
+    }
+
+    preselected.add(candidate.path);
+    seenGroups.add(candidate.group);
+  });
+
+  return preselected;
+}
+
 function KeymapLine({ hints }: { hints: string[] }) {
   return (
     <box style={{ flexDirection: "row", flexWrap: "wrap", width: "100%" }}>
@@ -411,6 +428,18 @@ function App({ onExit }: { onExit: () => void }) {
     setStatus("");
   }
 
+  async function preloadAssociateState(root: WorkspaceRef): Promise<void> {
+    const candidates = workspaces.filter((workspace) => workspace.group !== root.group && workspace.path !== root.path);
+    const workspaceTarget = await resolveWorkspaceTarget(root.path);
+    if (!workspaceTarget) {
+      return;
+    }
+
+    const workspaceDoc = await loadWorkspace(workspaceTarget);
+    const folderPaths = workspaceDoc.folders.map((folder) => folder.absolutePath);
+    setSelectedAssociatePaths(buildPreselectedAssociatePaths(root, candidates, folderPaths));
+  }
+
   async function openSelectedRoot(): Promise<void> {
     const root = filteredRoots[selectedRootIndex];
     if (!root) {
@@ -421,7 +450,12 @@ function App({ onExit }: { onExit: () => void }) {
     setRememberedRootPath(root.path);
     resetAssociateState();
     setScreen("associate");
-    setStatus("");
+    try {
+      await preloadAssociateState(root);
+    } catch (error: unknown) {
+      setSelectedAssociatePaths(new Set());
+      setStatus(`Failed to preload associates from existing workspace: ${String(error)}`, "error");
+    }
   }
 
   function toggleCurrentAssociate(): void {

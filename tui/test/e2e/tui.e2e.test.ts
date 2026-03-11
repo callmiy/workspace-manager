@@ -223,6 +223,98 @@ describe("tui e2e", () => {
   );
 
   it(
+    "preselects associates already present in the existing workspace file",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp");
+      const frontendPath = await createWorkspaceDir(fixture.rootDir, "services/frontend");
+
+      await writeWorkspaceFile(
+        rootPath,
+        "apischeduler.code-workspace",
+        `{
+  "folders": [
+    {
+      "name": "APISCHEDULER-BACKEND-M",
+      "path": ${JSON.stringify(rootPath)}
+    },
+    {
+      "name": "PHPAPP-M",
+      "path": ${JSON.stringify(phpPath)}
+    },
+    {
+      "name": "LEGACY",
+      "path": "/tmp/legacy"
+    }
+  ]
+}
+`,
+      );
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-M", path: phpPath }],
+        },
+        {
+          group: "frontend",
+          paths: [{ name: "FRONTEND-M", path: frontendPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      await harness.waitForText("[x] PHPAPP-M");
+
+      const pane = harness.capture();
+      expect(pane).toContain("[x] PHPAPP-M");
+      expect(pane).toContain("[ ] FRONTEND-M");
+      expect(pane).not.toContain("LEGACY");
+    },
+    20_000,
+  );
+
+  it(
+    "opens associate workspaces with no preselection when the existing workspace file is invalid",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp");
+
+      await writeWorkspaceFile(rootPath, "apischeduler.code-workspace", '{"folders": [}\n');
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-M", path: phpPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      await harness.waitForText("Failed to preload associates from existing workspace:");
+
+      const pane = harness.capture();
+      expect(pane).toContain("[ ] PHPAPP-M");
+      expect(pane).not.toContain("[x] PHPAPP-M");
+    },
+    20_000,
+  );
+
+  it(
     "returns to the originally selected root after saving",
     async () => {
       const fixture = await setupFixture();
