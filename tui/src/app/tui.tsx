@@ -104,6 +104,34 @@ function getPreviewMaxLines(): number {
   return Math.max(4, rows - 16);
 }
 
+function estimateWrappedLineCount(lines: string[], maxWidth: number): number {
+  if (maxWidth <= 0 || lines.length === 0) {
+    return 0;
+  }
+
+  const combined = lines.join(" | ");
+  return Math.max(1, Math.ceil(Math.max(1, combined.length) / maxWidth));
+}
+
+function clampVisibleRowCount(value: number): number {
+  return Math.max(1, value);
+}
+
+function getVisibleWindowBounds(total: number, selectedIndex: number, maxVisibleRows: number): { start: number; end: number } {
+  if (total <= 0) {
+    return { start: 0, end: 0 };
+  }
+
+  const visibleRows = Math.min(total, clampVisibleRowCount(maxVisibleRows));
+  const safeSelectedIndex = Math.min(Math.max(selectedIndex, 0), total - 1);
+  const centeredStart = safeSelectedIndex - Math.floor(visibleRows / 2);
+  const start = Math.min(Math.max(0, centeredStart), Math.max(0, total - visibleRows));
+  return {
+    start,
+    end: start + visibleRows,
+  };
+}
+
 function clampLine(text: string, maxWidth: number): string {
   if (text.length <= maxWidth) {
     return text;
@@ -192,7 +220,7 @@ function launchBinary(
 }
 
 function launchShellCommand(command: string, options?: { cwd?: string }): ReturnType<typeof spawnSync> {
-  return spawnSync("bash", ["-lc", command], {
+  return spawnSync("bash", ["-c", command], {
     stdio: "inherit",
     shell: false,
     cwd: options?.cwd,
@@ -247,6 +275,21 @@ function buildPreselectedAssociatePaths(root: WorkspaceRef, candidates: Workspac
   return preselected;
 }
 
+function applyDetectedVirtualEnv(rootPath: string, envVars: Record<string, string>): Record<string, string> {
+  const virtualEnvPath = path.join(rootPath, ".venv");
+  const pythonPath = path.join(virtualEnvPath, "bin", "python");
+  if (!existsSync(pythonPath)) {
+    return envVars;
+  }
+
+  const currentPath = envVars.PATH ?? process.env.PATH ?? "";
+  return {
+    ...envVars,
+    VIRTUAL_ENV: virtualEnvPath,
+    PATH: `${path.join(virtualEnvPath, "bin")}${currentPath ? `:${currentPath}` : ""}`,
+  };
+}
+
 function KeymapLine({ hints }: { hints: string[] }) {
   return (
     <box style={{ flexDirection: "row", flexWrap: "wrap", width: "100%" }}>
@@ -265,6 +308,7 @@ function App({ onExit }: { onExit: () => void }) {
   const outerLineMaxWidth = getOuterLineMaxWidth();
   const previewLineMaxWidth = getPreviewLineMaxWidth();
   const previewMaxLines = getPreviewMaxLines();
+  const terminalRows = process.stdout.rows ?? 40;
   const [screen, setScreen] = useState<Screen>("roots");
   const [config, setConfig] = useState<UserConfig>(defaultConfig());
   const [workspaces, setWorkspaces] = useState<WorkspaceRef[]>([]);
@@ -417,6 +461,55 @@ function App({ onExit }: { onExit: () => void }) {
       cancelled = true;
     };
   }, [selectedRoot]);
+
+  const rootKeyHints = useMemo(
+    () => ["j/k move", "Enter open", "/ search", "r refresh", "c cursor", "i inspect", "o config", "? keymaps", "q quit"],
+    [],
+  );
+
+  const associateKeyHints = useMemo(
+    () => ["j/k move", "space toggle", "a/n all-none", "/ search", "s save", "esc back", "o config", "? keymaps", "q quit"],
+    [],
+  );
+
+  const saveKeyHints = useMemo(() => ["Enter/y yes", "Esc/n no", "o config", "? keymaps"], []);
+
+  const rootVisibleRows = useMemo(() => {
+    const chromeRows =
+      1 +
+      (rootSearchMode || rootSearch ? 1 : 0) +
+      1 +
+      1 +
+      (showKeymaps ? estimateWrappedLineCount(rootKeyHints, outerLineMaxWidth) : 0);
+    return clampVisibleRowCount(terminalRows - chromeRows - 4);
+  }, [outerLineMaxWidth, rootKeyHints, rootSearch, rootSearchMode, showKeymaps, terminalRows]);
+
+  const associateVisibleRows = useMemo(() => {
+    const chromeRows =
+      1 +
+      (associateSearchMode || associateSearch ? 1 : 0) +
+      1 +
+      1 +
+      (showKeymaps ? estimateWrappedLineCount(associateKeyHints, outerLineMaxWidth) : 0);
+    return clampVisibleRowCount(terminalRows - chromeRows - 4);
+  }, [associateKeyHints, associateSearch, associateSearchMode, outerLineMaxWidth, showKeymaps, terminalRows]);
+
+  const rootWindow = useMemo(
+    () => getVisibleWindowBounds(filteredRoots.length, selectedRootIndex, rootVisibleRows),
+    [filteredRoots.length, rootVisibleRows, selectedRootIndex],
+  );
+
+  const visibleRoots = useMemo(() => filteredRoots.slice(rootWindow.start, rootWindow.end), [filteredRoots, rootWindow.end, rootWindow.start]);
+
+  const associateWindow = useMemo(
+    () => getVisibleWindowBounds(filteredAssociates.length, selectedAssociateIndex, associateVisibleRows),
+    [associateVisibleRows, filteredAssociates.length, selectedAssociateIndex],
+  );
+
+  const visibleAssociates = useMemo(
+    () => filteredAssociates.slice(associateWindow.start, associateWindow.end),
+    [associateWindow.end, associateWindow.start, filteredAssociates],
+  );
 
   useEffect(() => {
     if (screen !== "roots") {
@@ -616,6 +709,7 @@ function App({ onExit }: { onExit: () => void }) {
         return;
       }
     }
+    cursorEnv = applyDetectedVirtualEnv(resolvedRootPath, cursorEnv);
 
     const command = buildShellEnvPrefixedCommand("cursor", [workspacePath], cursorEnv);
     const result = launchShellCommand(command, { cwd: resolvedRootPath });
@@ -794,18 +888,6 @@ function App({ onExit }: { onExit: () => void }) {
   });
 
   if (screen === "roots") {
-    const keyHints = [
-      "j/k move",
-      "Enter open",
-      "/ search",
-      "r refresh",
-      "c cursor",
-      "i inspect",
-      "o config",
-      "? keymaps",
-      "q quit",
-    ];
-
     return (
       <box key={`roots-screen-${renderEpoch}`} style={{ flexDirection: "column", paddingTop: 1 }}>
         <box
@@ -831,10 +913,11 @@ function App({ onExit }: { onExit: () => void }) {
               flexDirection: "column",
               padding: 0,
               marginTop: 1,
-              flexGrow: 1,
             }}
           >
-            {filteredRoots.map((workspace, index) => (
+            {visibleRoots.map((workspace, visibleIndex) => {
+              const index = rootWindow.start + visibleIndex;
+              return (
               <text
                 key={workspace.id}
                 bg={index === selectedRootIndex ? ROW_ACTIVE_BG : undefined}
@@ -842,12 +925,13 @@ function App({ onExit }: { onExit: () => void }) {
               >
                 {fitLine(`${linePrefix(index === selectedRootIndex)} ${workspaceLabel(workspace)}`, rowMaxWidth)}
               </text>
-            ))}
+              );
+            })}
             {workspaces.length === 0 ? <text>No root workspaces available.</text> : null}
             {workspaces.length > 0 && filteredRoots.length === 0 ? <text>No root workspaces match the current search.</text> : null}
           </box>
           <text fg={messageFg}>{fitLine(isRefreshing ? "Loading workspaces..." : message, outerLineMaxWidth)}</text>
-          {showKeymaps ? <KeymapLine hints={keyHints} /> : null}
+          {showKeymaps ? <KeymapLine hints={rootKeyHints} /> : null}
         </box>
       </box>
     );
@@ -855,7 +939,6 @@ function App({ onExit }: { onExit: () => void }) {
 
   if (screen === "save") {
     const total = 1 + selectedAssociates.length;
-    const keyHints = ["Enter/y yes", "Esc/n no", "o config", "? keymaps"];
 
     return (
       <box key={`save-screen-${renderEpoch}`} style={{ flexDirection: "column", paddingTop: 1 }}>
@@ -885,23 +968,11 @@ function App({ onExit }: { onExit: () => void }) {
             <text fg="#f59e0b">{fitLine("Warning: no associate workspaces selected; only root workspace will be saved", outerLineMaxWidth)}</text>
           ) : null}
           <text fg={messageFg}>{fitLine(message, outerLineMaxWidth)}</text>
-          {showKeymaps ? <KeymapLine hints={keyHints} /> : null}
+          {showKeymaps ? <KeymapLine hints={saveKeyHints} /> : null}
         </box>
       </box>
     );
   }
-
-  const associateKeyHints = [
-    "j/k move",
-    "space toggle",
-    "a/n all-none",
-    "/ search",
-    "s save",
-    "esc back",
-    "o config",
-    "? keymaps",
-    "q quit",
-  ];
 
   return (
     <box key={`associate-screen-${renderEpoch}`} style={{ flexDirection: "column", paddingTop: 1 }}>
@@ -927,7 +998,9 @@ function App({ onExit }: { onExit: () => void }) {
           </text>
         ) : null}
         <box style={{ flexDirection: "column", padding: 0, marginTop: 1, flexGrow: 1 }}>
-          {filteredAssociates.map((workspace, index) => (
+          {visibleAssociates.map((workspace, visibleIndex) => {
+            const index = associateWindow.start + visibleIndex;
+            return (
             <text
               key={workspace.id}
               bg={
@@ -946,7 +1019,8 @@ function App({ onExit }: { onExit: () => void }) {
                 rowMaxWidth,
               )}
             </text>
-          ))}
+            );
+          })}
           {associateCandidates.length === 0 ? <text>No available associates for this root.</text> : null}
           {associateCandidates.length > 0 && filteredAssociates.length === 0 ? (
             <text>No associate workspaces match the current search.</text>
