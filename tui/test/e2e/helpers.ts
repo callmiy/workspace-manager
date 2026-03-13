@@ -19,6 +19,7 @@ type FixtureContext = {
   editorLogPath: string;
   cursorLogPath: string;
   nvimLogPath: string;
+  cursorEnvLogPath: string;
 };
 
 function runTmux(args: string[]): string {
@@ -40,11 +41,12 @@ export async function createFixtureContext(): Promise<FixtureContext> {
   const binDir = path.join(rootDir, "bin");
   const editorLogPath = path.join(rootDir, "editor.log");
   const cursorLogPath = path.join(rootDir, "cursor.log");
+  const cursorEnvLogPath = path.join(rootDir, "cursor-env.log");
   const nvimLogPath = path.join(rootDir, "nvim.log");
 
   await mkdir(binDir, { recursive: true });
   await writeStubBinary(path.join(binDir, "stub-editor"), editorLogPath);
-  await writeStubBinary(path.join(binDir, "cursor"), cursorLogPath);
+  await writeStubBinary(path.join(binDir, "cursor"), cursorLogPath, cursorEnvLogPath);
   await writeStubBinary(path.join(binDir, "nvim"), nvimLogPath);
 
   return {
@@ -54,13 +56,20 @@ export async function createFixtureContext(): Promise<FixtureContext> {
     editorLogPath,
     cursorLogPath,
     nvimLogPath,
+    cursorEnvLogPath,
   };
 }
 
-async function writeStubBinary(filePath: string, logPath: string): Promise<void> {
+async function writeStubBinary(filePath: string, logPath: string, envLogPath?: string): Promise<void> {
   const script = `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> ${JSON.stringify(logPath)}
+if [[ -n "\${WKS_STUB_ENV_KEYS:-}" ]] && [[ -n ${JSON.stringify(envLogPath ?? "")} ]]; then
+  while IFS= read -r __wks_key; do
+    [[ -z "$__wks_key" ]] && continue
+    printf '%s=%s\\n' "$__wks_key" "\${!__wks_key-}" >> ${JSON.stringify(envLogPath ?? "")}
+  done < <(printf '%s\\n' "$WKS_STUB_ENV_KEYS" | tr ',' '\\n')
+fi
 `;
   await writeFile(filePath, script, "utf8");
   await chmod(filePath, 0o755);
@@ -131,6 +140,7 @@ export class TmuxHarness {
     binDir: string;
     editorCommand?: string;
     nvimServer?: string;
+    stubEnvKeys?: string[];
   }): Promise<TmuxHarness> {
     const sessionName = `wks-e2e-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const env = {
@@ -139,6 +149,7 @@ export class TmuxHarness {
       EDITOR: options.editorCommand ?? "stub-editor --wait",
       NVIM: options.nvimServer ?? "",
       TERM: process.env.TERM ?? "screen-256color",
+      WKS_STUB_ENV_KEYS: (options.stubEnvKeys ?? []).join(","),
     };
 
     runTmux([

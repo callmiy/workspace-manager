@@ -52,5 +52,6 @@ export type WorkspacePathConfig = {
 export type WorkspaceGroup = {
   group: string;
   paths: WorkspacePathConfig[];
+  "env-export-file"?: string;
   [key: string]: unknown;
 };

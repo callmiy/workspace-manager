@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { UserConfig, WorkspaceRef } from "../domain/types.js";
 import { defaultConfig, ensureConfigDir, loadConfig, resolveConfigPath } from "../config/config.js";
 import { discoverWorkspaces } from "../io/discovery.js";
+import { buildShellEnvPrefixedCommand, resolveExportedEnvironment } from "../io/env-export.js";
 import { loadWorkspace, resolveWorkspaceTarget, writeWorkspaceFolders } from "../io/workspace.js";
 
 type Screen = "roots" | "associate" | "save";
@@ -177,10 +178,25 @@ function parseCommand(command: string): string[] | null {
   return tokens.length > 0 ? tokens : null;
 }
 
-function launchBinary(binary: string, args: string[]): ReturnType<typeof spawnSync> {
+function launchBinary(
+  binary: string,
+  args: string[],
+  options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+): ReturnType<typeof spawnSync> {
   return spawnSync(binary, args, {
     stdio: "inherit",
     shell: false,
+    cwd: options?.cwd,
+    env: options?.env,
+  });
+}
+
+function launchShellCommand(command: string, options?: { cwd?: string }): ReturnType<typeof spawnSync> {
+  return spawnSync("bash", ["-lc", command], {
+    stdio: "inherit",
+    shell: false,
+    cwd: options?.cwd,
+    env: process.env,
   });
 }
 
@@ -588,7 +604,21 @@ function App({ onExit }: { onExit: () => void }) {
       return;
     }
 
-    const result = launchBinary("cursor", [workspacePath]);
+    const envExportFile =
+      typeof root.metadata["env-export-file"] === "string" ? String(root.metadata["env-export-file"]) : null;
+
+    let cursorEnv: Record<string, string> = {};
+    if (envExportFile) {
+      try {
+        cursorEnv = await resolveExportedEnvironment(envExportFile, resolvedRootPath);
+      } catch (error: unknown) {
+        setStatus(`Cannot open in Cursor: ${String(error)}`, "error");
+        return;
+      }
+    }
+
+    const command = buildShellEnvPrefixedCommand("cursor", [workspacePath], cursorEnv);
+    const result = launchShellCommand(command, { cwd: resolvedRootPath });
 
     if (result.error) {
       setStatus(`Failed to open Cursor: ${String(result.error)}`, "error");

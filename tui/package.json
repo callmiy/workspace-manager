@@ -12,7 +12,7 @@
     "dev": "bun run src/cli/index.ts",
     "start": "bun run dist/cli/index.js",
     "test": "npm run test:unit",
-    "test:unit": "vitest run test/config.test.ts test/discovery.test.ts test/workspace.test.ts",
+    "test:unit": "vitest run test/config.test.ts test/discovery.test.ts test/workspace.test.ts test/env-export.test.ts",
     "test:e2e": "vitest run test/e2e/*.test.ts"
   },
   "dependencies": {

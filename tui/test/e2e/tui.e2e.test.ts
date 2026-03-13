@@ -472,6 +472,104 @@ describe("tui e2e", () => {
     },
     20_000,
   );
+
+  it(
+    "injects resolved env exports when opening Cursor from a root workspace",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler--worktrees/0");
+      const envFile = await writeWorkspaceFile(
+        fixture.rootDir,
+        "scripts/.scratch-env-apischeduler.sh",
+        `#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# WORKSPACE MANAGER COPY ENVIRONMENT VARIABLES
+# -----------------------------------------------------------------------------
+export API_SCHEDULER_GIT_ROOT="$(pwd)"
+export PYTHON_BIN="$API_SCHEDULER_GIT_ROOT/.venv/bin/python"
+export EBNIS_LINT_CMDS="bash $API_SCHEDULER_GIT_ROOT/lint.sh"
+# -----------------------------------------------------------------------------
+# /END/ WORKSPACE MANAGER COPY ENVIRONMENT VARIABLES
+# -----------------------------------------------------------------------------
+`,
+      );
+      const workspacePath = await writeWorkspaceFile(rootPath, "apischeduler.code-workspace", '{ "folders": [] }\n');
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          metadata: {
+            "env-export-file": envFile,
+          },
+          paths: [{ name: "APISCHEDULER-BACKEND-0", path: rootPath }],
+        },
+      ]);
+
+      const harness = await TmuxHarness.launch({
+        workdir: path.resolve(testDir, "..", ".."),
+        entrypoint: path.join("src", "cli", "index.ts"),
+        configPath: fixture.workspaceConfigPath,
+        binDir: fixture.binDir,
+        stubEnvKeys: ["API_SCHEDULER_GIT_ROOT", "PYTHON_BIN", "EBNIS_LINT_CMDS"],
+      });
+      harnesses.push(harness);
+
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("c");
+      await harness.waitForText(`Opened in Cursor: ${workspacePath}`);
+
+      const cursorLogs = await readLogLines(fixture.cursorLogPath);
+      const cursorEnvLogs = await readLogLines(fixture.cursorEnvLogPath);
+      expect(cursorLogs).toContain(workspacePath);
+      expect(cursorEnvLogs).toContain(`API_SCHEDULER_GIT_ROOT=${rootPath}`);
+      expect(cursorEnvLogs).toContain(`PYTHON_BIN=${path.join(rootPath, ".venv", "bin", "python")}`);
+      expect(cursorEnvLogs).toContain(`EBNIS_LINT_CMDS=bash ${path.join(rootPath, "lint.sh")}`);
+    },
+    20_000,
+  );
+
+  it(
+    "blocks opening Cursor when env-export-file resolution fails",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      await writeWorkspaceFile(rootPath, "apischeduler.code-workspace", '{ "folders": [] }\n');
+      const envFile = await writeWorkspaceFile(
+        fixture.rootDir,
+        "scripts/.scratch-env-apischeduler.sh",
+        `#!/usr/bin/env bash
+export FOO=bar
+`,
+      );
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          metadata: {
+            "env-export-file": envFile,
+          },
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+      ]);
+
+      const harness = await TmuxHarness.launch({
+        workdir: path.resolve(testDir, "..", ".."),
+        entrypoint: path.join("src", "cli", "index.ts"),
+        configPath: fixture.workspaceConfigPath,
+        binDir: fixture.binDir,
+        stubEnvKeys: ["FOO"],
+      });
+      harnesses.push(harness);
+
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("c");
+      await harness.waitForText("Cannot open in Cursor: Error: Missing start marker");
+
+      const cursorLogs = await readLogLines(fixture.cursorLogPath);
+      expect(cursorLogs).toHaveLength(0);
+    },
+    20_000,
+  );
 });
 
 async function setupFixture() {
