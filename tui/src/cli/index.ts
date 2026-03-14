@@ -3,6 +3,7 @@ import { loadConfig } from "../config/config.js";
 import { discoverWorkspaces } from "../io/discovery.js";
 import { applySelection, loadWorkspace, validateWorkspace } from "../io/workspace.js";
 import { runTui } from "../app/tui.js";
+import { WKS_VERSION } from "../version.js";
 
 type ParsedArgs = {
   command?: string;
@@ -10,6 +11,10 @@ type ParsedArgs = {
 };
 
 function parseArgs(argv: string[]): ParsedArgs {
+  if (argv.length === 1 && (argv[0] === "-v" || argv[0] === "--version")) {
+    return { command: "version", flags: new Map() };
+  }
+
   const [command, ...rest] = argv;
   const flags = new Map<string, string>();
 
@@ -62,6 +67,7 @@ function parseKeepIndexes(value: string | undefined): number[] {
 function printUsage(): void {
   console.log(`_wks commands:
   _wks                               Launch interactive TUI
+  _wks -v | --version                Print version
   _wks list                          List discovered workspace files
   _wks folders --workspace <path>    List folder entries for workspace
   _wks apply --workspace <path> --keep <csv-indexes>
@@ -73,6 +79,11 @@ async function run(): Promise<void> {
 
   if (!args.command) {
     await runTui();
+    return;
+  }
+
+  if (args.command === "version") {
+    console.log(WKS_VERSION);
     return;
   }
 

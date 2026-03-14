@@ -7,16 +7,46 @@
 ### Public binary (no clone)
 
 ```bash
+mkdir -p "$HOME/.local/bin" && \
+curl -fL https://github.com/callmiy/workspace-manager/releases/download/v0.1.3/_wks-linux-x64.tar.gz \
+  | tar -xzO _wks > "$HOME/.local/bin/_wks" && chmod +x "$HOME/.local/bin/_wks"
+```
+
+Alternative installer script:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/callmiy/workspace-manager/main/tui/scripts/install.sh | bash
 ```
 
-Optional environment overrides:
+Optional environment overrides for the installer script:
 
 ```bash
-WKS_VERSION=v0.1.0 WKS_BIN_DIR="$HOME/.local/bin" bash tui/scripts/install.sh
+WKS_VERSION=v0.1.3 WKS_BIN_DIR="$HOME/.local/bin" bash tui/scripts/install.sh
 ```
 
-The installer downloads a release asset for your platform and installs `_wks` to `~/.local/bin` by default.
+The direct download above writes `_wks` to `~/.local/bin/_wks`.
+The installer script resolves the correct release asset for your platform and installs `_wks` to `~/.local/bin` by default.
+
+### Cut a release
+
+```bash
+cd tui
+npm run release -- 0.1.4
+```
+
+That script:
+
+- updates `package.json` and `package-lock.json`
+- updates versioned install examples in this README
+- creates a release commit
+- creates annotated tag `v0.1.4`
+
+To also push the commit and tag:
+
+```bash
+cd tui
+npm run release -- 0.1.4 --push
+```
 
 ### From source
 

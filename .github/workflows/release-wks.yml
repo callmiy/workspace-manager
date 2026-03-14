@@ -18,6 +18,8 @@ jobs:
   build:
     name: build-${{ matrix.asset }}
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,9 +51,11 @@ jobs:
 
       - name: Build _wks binary
         working-directory: tui
+        env:
+          WKS_VERSION: ${{ env.RELEASE_TAG }}
         run: |
           mkdir -p release
-          bun build --compile --target ${{ matrix.target }} --outfile release/_wks src/cli/index.ts
+          node ./scripts/build-binary.mjs release/_wks --target ${{ matrix.target }}
           tar -C release -czf release/_wks-${{ matrix.asset }}.tar.gz _wks
 
       - name: Upload artifact
