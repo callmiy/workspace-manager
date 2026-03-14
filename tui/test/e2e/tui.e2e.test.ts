@@ -570,6 +570,47 @@ export FOO=bar
     },
     20_000,
   );
+
+  it(
+    "auto-detects .venv and launches Cursor in that virtualenv context",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler--worktrees/0");
+      await createWorkspaceDir(fixture.rootDir, "services/api.scheduler--worktrees/0/.venv/bin");
+      await writeWorkspaceFile(rootPath, ".venv/bin/python", "#!/usr/bin/env bash\n",);
+      const workspacePath = await writeWorkspaceFile(rootPath, "apischeduler.code-workspace", '{ "folders": [] }\n');
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-0", path: rootPath }],
+        },
+      ]);
+
+      const harness = await TmuxHarness.launch({
+        workdir: path.resolve(testDir, "..", ".."),
+        entrypoint: path.join("src", "cli", "index.ts"),
+        configPath: fixture.workspaceConfigPath,
+        binDir: fixture.binDir,
+        stubEnvKeys: ["VIRTUAL_ENV", "PATH"],
+      });
+      harnesses.push(harness);
+
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("c");
+      await harness.waitForText(`Opened in Cursor: ${workspacePath}`);
+
+      const cursorLogs = await readLogLines(fixture.cursorLogPath);
+      const cursorEnvLogs = await readLogLines(fixture.cursorEnvLogPath);
+      expect(cursorLogs).toContain(workspacePath);
+      expect(cursorEnvLogs).toContain(`VIRTUAL_ENV=${path.join(rootPath, ".venv")}`);
+      const pathLine = cursorEnvLogs.find((line) => line.startsWith("PATH="));
+      expect(pathLine).toBeDefined();
+      expect(pathLine?.startsWith(`PATH=${path.join(rootPath, ".venv", "bin")}:`)).toBe(true);
+      expect(pathLine).toContain(`:${fixture.binDir}:`);
+    },
+    20_000,
+  );
 });
 
 async function setupFixture() {
