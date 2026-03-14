@@ -7,7 +7,6 @@ import process from "node:process";
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const packageJsonPath = path.join(repoRoot, "package.json");
 const packageLockPath = path.join(repoRoot, "package-lock.json");
-const readmePath = path.join(repoRoot, "README.md");
 
 function usage() {
   console.error(`Usage:
@@ -39,20 +38,6 @@ function writeJsonVersion(filePath, version) {
     throw new Error(`Could not update version in ${filePath}`);
   }
   writeFileSync(filePath, next);
-}
-
-function replaceReadmeVersion(content, version) {
-  return content
-    .replace(/releases\/download\/v\d+\.\d+\.\d+\//g, `releases/download/v${version}/`)
-    .replace(/WKS_VERSION=v\d+\.\d+\.\d+/g, `WKS_VERSION=v${version}`);
-}
-
-function writeReadmeVersion(version) {
-  const original = readFileSync(readmePath, "utf8");
-  const next = replaceReadmeVersion(original, version);
-  if (next !== original) {
-    writeFileSync(readmePath, next);
-  }
 }
 
 function runGit(args) {
@@ -109,24 +94,16 @@ if (!dryRun) {
 if (dryRun) {
   const packageJsonPreview = replaceJsonVersion(readFileSync(packageJsonPath, "utf8"), version);
   const packageLockPreview = replaceJsonVersion(readFileSync(packageLockPath, "utf8"), version);
-  const readmePreview = replaceReadmeVersion(readFileSync(readmePath, "utf8"), version);
   console.log(`Dry run for ${tag}`);
   console.log(`- package.json version -> ${JSON.parse(packageJsonPreview).version}`);
   console.log(`- package-lock.json version -> ${JSON.parse(packageLockPreview).version}`);
-  console.log(
-    `- README release download refs updated -> ${readmePreview.includes(`/releases/download/${tag}/`) ? "yes" : "no"}`,
-  );
-  console.log(
-    `- README installer env example updated -> ${readmePreview.includes(`WKS_VERSION=${tag}`) ? "yes" : "no"}`,
-  );
   process.exit(0);
 }
 
 writeJsonVersion(packageJsonPath, version);
 writeJsonVersion(packageLockPath, version);
-writeReadmeVersion(version);
 
-runGit(["add", "tui/package.json", "tui/package-lock.json", "tui/README.md"]);
+runGit(["add", "tui/package.json", "tui/package-lock.json"]);
 runGit(["commit", "-m", `Release ${tag}`, "-m", `Align the fallback package version and install docs with ${tag}`]);
 runGit(["tag", "-a", tag, "-m", tag]);
 

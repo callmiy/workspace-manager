@@ -8,7 +8,7 @@
 
 ```bash
 mkdir -p "$HOME/.local/bin" && \
-curl -fL https://github.com/callmiy/workspace-manager/releases/download/v0.1.3/_wks-linux-x64.tar.gz \
+curl -fL https://github.com/callmiy/workspace-manager/releases/latest/download/_wks-linux-x64.tar.gz \
   | tar -xzO _wks > "$HOME/.local/bin/_wks" && chmod +x "$HOME/.local/bin/_wks"
 ```
 
@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/callmiy/workspace-manager/main/tui/
 Optional environment overrides for the installer script:
 
 ```bash
-WKS_VERSION=v0.1.3 WKS_BIN_DIR="$HOME/.local/bin" bash tui/scripts/install.sh
+WKS_VERSION=vX.Y.Z WKS_BIN_DIR="$HOME/.local/bin" bash tui/scripts/install.sh
 ```
 
 The direct download above writes `_wks` to `~/.local/bin/_wks`.
@@ -37,7 +37,6 @@ npm run release -- 0.1.4
 That script:
 
 - updates `package.json` and `package-lock.json`
-- updates versioned install examples in this README
 - creates a release commit
 - creates annotated tag `v0.1.4`
 
