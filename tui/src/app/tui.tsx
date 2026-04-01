@@ -250,6 +250,11 @@ function launchEditorWithFile(editorCommand: string, filePath: string): ReturnTy
   return launchBinary(binary, [...args, filePath]);
 }
 
+type SaveResult = {
+  targetPath: string;
+  folderCount: number;
+};
+
 function buildFolderObjects(root: WorkspaceRef, associates: WorkspaceRef[]): Record<string, unknown>[] {
   return [root, ...associates].map((workspace) => ({
     name: workspace.name,
@@ -472,7 +477,7 @@ function App({ onExit }: { onExit: () => void }) {
     [],
   );
 
-  const saveKeyHints = useMemo(() => ["Enter/y yes", "Esc/n no", "o config", "? keymaps"], []);
+  const saveKeyHints = useMemo(() => ["Enter/y save", "c save+cursor", "Esc/n back", "o config", "? keymaps"], []);
 
   const rootVisibleRows = useMemo(() => {
     const chromeRows =
@@ -611,9 +616,20 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function saveSelection(): Promise<void> {
-    if (!selectedRoot || isSaving) {
+    const result = await saveWorkspaceSelection();
+    if (!result) {
       return;
     }
+
+    await completePostSaveNavigation();
+    setStatus(`Saved ${result.folderCount} folder(s) to ${result.targetPath}`, "success");
+  }
+
+  async function saveWorkspaceSelection(): Promise<SaveResult | null> {
+    if (!selectedRoot || isSaving) {
+      return null;
+    }
+
     setIsSaving(true);
 
     const folders = previewFolders.map((entry) => {
@@ -630,20 +646,86 @@ function App({ onExit }: { onExit: () => void }) {
       const targetPath = existingTarget ?? path.join(selectedRoot.path, lowerCaseWorkspaceFilename(selectedRoot.name));
 
       await writeWorkspaceFolders(targetPath, folders, false);
-
-      setScreen("roots");
-      setSelectedRoot(null);
-      setRootSearch("");
-      setRootSearchMode(false);
-      setSelectedRootIndex(findWorkspaceIndexByPath(workspaces, selectedRoot.path));
-      await refreshWorkspaces();
-      setStatus(`Saved ${folders.length} folder(s) to ${targetPath}`, "success");
+      return {
+        targetPath,
+        folderCount: folders.length,
+      };
     } catch (error: unknown) {
       setStatus(`Save failed: ${String(error)}`, "error");
       setScreen("associate");
+      return null;
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function completePostSaveNavigation(): Promise<void> {
+    if (!selectedRoot) {
+      return;
+    }
+
+    setRememberedRootPath(selectedRoot.path);
+    setScreen("roots");
+    setSelectedRoot(null);
+    setRootSearch("");
+    setRootSearchMode(false);
+    setSelectedRootIndex(findWorkspaceIndexByPath(workspaces, selectedRoot.path));
+    await refreshWorkspaces();
+  }
+
+  async function openWorkspaceInCursor(root: WorkspaceRef, workspacePath: string): Promise<true | string> {
+    const resolvedRootPath = path.resolve(root.path);
+    if (!existsSync(resolvedRootPath)) {
+      return `Cannot open in Cursor: folder does not exist: ${resolvedRootPath}`;
+    }
+
+    const envExportFile =
+      typeof root.metadata["env-export-file"] === "string" ? String(root.metadata["env-export-file"]) : null;
+
+    let cursorEnv: Record<string, string> = {};
+    if (envExportFile) {
+      try {
+        cursorEnv = await resolveExportedEnvironment(envExportFile, resolvedRootPath);
+      } catch (error: unknown) {
+        return `Cannot open in Cursor: ${String(error)}`;
+      }
+    }
+    cursorEnv = applyDetectedVirtualEnv(resolvedRootPath, cursorEnv);
+
+    const command = buildShellEnvPrefixedCommand("cursor", [workspacePath], cursorEnv);
+    const result = launchShellCommand(command, { cwd: resolvedRootPath });
+
+    if (result.error) {
+      return `Failed to open Cursor: ${String(result.error)}`;
+    }
+
+    if (typeof result.status === "number" && result.status !== 0) {
+      return `Cursor exited with status ${result.status}`;
+    }
+
+    return true;
+  }
+
+  async function saveAndOpenSelectionInCursor(): Promise<void> {
+    if (!selectedRoot || isSaving) {
+      return;
+    }
+
+    const root = selectedRoot;
+    const result = await saveWorkspaceSelection();
+    if (!result) {
+      return;
+    }
+
+    const cursorResult = await openWorkspaceInCursor(root, result.targetPath);
+    await completePostSaveNavigation();
+
+    if (cursorResult === true) {
+      setStatus(`Saved ${result.folderCount} folder(s) and opened in Cursor: ${result.targetPath}`, "success");
+      return;
+    }
+
+    setStatus(`Saved ${result.folderCount} folder(s) to ${result.targetPath}, but ${cursorResult}`, "error");
   }
 
   async function openConfigInEditor(): Promise<void> {
@@ -696,31 +778,9 @@ function App({ onExit }: { onExit: () => void }) {
       setStatus(`Cannot open in Cursor: no .code-workspace found under ${resolvedRootPath}`, "error");
       return;
     }
-
-    const envExportFile =
-      typeof root.metadata["env-export-file"] === "string" ? String(root.metadata["env-export-file"]) : null;
-
-    let cursorEnv: Record<string, string> = {};
-    if (envExportFile) {
-      try {
-        cursorEnv = await resolveExportedEnvironment(envExportFile, resolvedRootPath);
-      } catch (error: unknown) {
-        setStatus(`Cannot open in Cursor: ${String(error)}`, "error");
-        return;
-      }
-    }
-    cursorEnv = applyDetectedVirtualEnv(resolvedRootPath, cursorEnv);
-
-    const command = buildShellEnvPrefixedCommand("cursor", [workspacePath], cursorEnv);
-    const result = launchShellCommand(command, { cwd: resolvedRootPath });
-
-    if (result.error) {
-      setStatus(`Failed to open Cursor: ${String(result.error)}`, "error");
-      return;
-    }
-
-    if (typeof result.status === "number" && result.status !== 0) {
-      setStatus(`Cursor exited with status ${result.status}`, "error");
+    const result = await openWorkspaceInCursor(root, workspacePath);
+    if (result !== true) {
+      setStatus(result, "error");
       return;
     }
 
@@ -879,6 +939,9 @@ function App({ onExit }: { onExit: () => void }) {
     if (screen === "save") {
       if (key.name === "return" || key.name === "y") {
         void saveSelection();
+      }
+      if (key.name === "c") {
+        void saveAndOpenSelectionInCursor();
       }
       if (key.name === "escape" || key.name === "n") {
         setScreen("associate");

@@ -433,6 +433,80 @@ describe("tui e2e", () => {
   );
 
   it(
+    "saves and opens Cursor from save preview",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/scheduler-frontend--worktrees/0");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp--worktrees/0");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "frontend",
+          paths: [{ name: "APISCHEDULER-FRONTEND-0", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-0", path: phpPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKey("Space");
+      await harness.waitForText("[x] PHPAPP-0");
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKey("c");
+
+      const targetWorkspacePath = path.join(rootPath, "apischeduler-frontend-0.code-workspace");
+      await harness.waitForText(`Saved 2 folder(s) and opened in Cursor: ${targetWorkspacePath}`);
+      await harness.waitForText("Root Workspace");
+      expect(harness.capture()).toContain("> APISCHEDULER-FRONTEND-0: ");
+
+      const saved = await readFile(targetWorkspacePath, "utf8");
+      expect(saved).toContain('"name": "APISCHEDULER-FRONTEND-0"');
+      expect(saved).toContain('"name": "PHPAPP-0"');
+
+      const cursorLogs = await readLogLines(fixture.cursorLogPath);
+      expect(cursorLogs).toContain(targetWorkspacePath);
+    },
+    20_000,
+  );
+
+  it(
+    "keeps Enter on save preview as save-only",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKey("Enter");
+
+      const targetWorkspacePath = path.join(rootPath, "apischeduler-backend-m.code-workspace");
+      await harness.waitForText(`Saved 1 folder(s) to ${targetWorkspacePath}`);
+      await harness.waitForText("Root Workspace");
+
+      const cursorLogs = await readLogLines(fixture.cursorLogPath);
+      expect(cursorLogs).toHaveLength(0);
+    },
+    20_000,
+  );
+
+  it(
     "uses parent nvim remote open when running inside nvim and editor is nvim-family",
     async () => {
       const fixture = await setupFixture();
