@@ -101,7 +101,7 @@ local function cleanup_session(session, opts)
   end
 
   if opts.notify_exit and not session.user_closed and session.exit_code ~= 0 then
-    notify(string.format("`_wks` exited with status %d", session.exit_code), vim.log.levels.ERROR)
+    notify(string.format("`wks` exited with status %d", session.exit_code), vim.log.levels.ERROR)
   end
 end
 

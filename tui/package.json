@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "bin": {
-    "_wks": "./dist/cli/index.js"
+    "wks": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "build:binary": "node ./scripts/build-binary.mjs ./bin/_wks",
+    "build:binary": "node ./scripts/build-binary.mjs ./bin/wks",
     "dev": "bun run src/cli/index.ts",
     "release": "node ./scripts/release.mjs",
     "start": "bun run dist/cli/index.js",

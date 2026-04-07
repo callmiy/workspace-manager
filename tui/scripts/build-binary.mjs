@@ -26,7 +26,7 @@ function resolveVersion() {
 }
 
 const version = resolveVersion();
-const outfile = process.argv[2] ?? "./bin/_wks";
+const outfile = process.argv[2] ?? "./bin/wks";
 const targetArgs = process.argv.slice(3);
 
 const result = spawnSync(

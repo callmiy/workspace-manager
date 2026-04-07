@@ -1,7 +1,7 @@
 local M = {}
 
 local defaults = {
-  binary = "_wks",
+  binary = "wks",
   default_mode = "tab",
   float = {
     width = 0.9,

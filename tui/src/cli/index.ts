@@ -65,13 +65,13 @@ function parseKeepIndexes(value: string | undefined): number[] {
 }
 
 function printUsage(): void {
-  console.log(`_wks commands:
-  _wks                               Launch interactive TUI
-  _wks -v | --version                Print version
-  _wks list                          List discovered workspace files
-  _wks folders --workspace <path>    List folder entries for workspace
-  _wks apply --workspace <path> --keep <csv-indexes>
-  _wks validate --workspace <path>`);
+  console.log(`wks commands:
+  wks                               Launch interactive TUI
+  wks -v | --version                Print version
+  wks list                          List discovered workspace files
+  wks folders --workspace <path>    List folder entries for workspace
+  wks apply --workspace <path> --keep <csv-indexes>
+  wks validate --workspace <path>`);
 }
 
 async function run(): Promise<void> {
@@ -152,6 +152,6 @@ async function run(): Promise<void> {
 }
 
 run().catch((error: unknown) => {
-  console.error(`_wks error: ${String(error)}`);
+  console.error(`wks error: ${String(error)}`);
   process.exit(1);
 });

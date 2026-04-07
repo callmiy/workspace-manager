@@ -1,6 +1,6 @@
-# _wks (Workspace Manager TUI)
+# wks (Workspace Manager TUI)
 
-`_wks` is a terminal UI for managing `*.code-workspace` files and manually controlling the `folders` array to keep IDE LLM context focused.
+`wks` is a terminal UI for managing `*.code-workspace` files and manually controlling the `folders` array to keep IDE LLM context focused.
 
 ## Install
 
@@ -8,8 +8,8 @@
 
 ```bash
 mkdir -p "$HOME/.local/bin" && \
-curl -fL https://github.com/callmiy/workspace-manager/releases/latest/download/_wks-linux-x64.tar.gz \
-  | tar -xzO _wks > "$HOME/.local/bin/_wks" && chmod +x "$HOME/.local/bin/_wks"
+curl -fL https://github.com/callmiy/workspace-manager/releases/latest/download/wks-linux-x64.tar.gz \
+  | tar -xzO wks > "$HOME/.local/bin/wks" && chmod +x "$HOME/.local/bin/wks"
 ```
 
 Alternative installer script:
@@ -24,8 +24,8 @@ Optional environment overrides for the installer script:
 WKS_VERSION=vX.Y.Z WKS_BIN_DIR="$HOME/.local/bin" bash tui/scripts/install.sh
 ```
 
-The direct download above writes `_wks` to `~/.local/bin/_wks`.
-The installer script resolves the correct release asset for your platform and installs `_wks` to `~/.local/bin` by default.
+The direct download above writes `wks` to `~/.local/bin/wks`.
+The installer script resolves the correct release asset for your platform and installs `wks` to `~/.local/bin` by default.
 
 ### Cut a release
 
@@ -56,15 +56,15 @@ npm run build
 npm link
 ```
 
-After linking, `_wks` is available on your PATH.
+After linking, `wks` is available on your PATH.
 `bun` must be installed because OpenTUI depends on Bun runtime modules.
 
 ### Release assets
 
 GitHub Actions publishes these binary archives per release tag:
 
-- `_wks-linux-x64.tar.gz`
-- `_wks-darwin-arm64.tar.gz`
+- `wks-linux-x64.tar.gz`
+- `wks-darwin-arm64.tar.gz`
 
 ## Config
 
@@ -99,7 +99,7 @@ export WORKSPACE_MANAGER_CONFIG=/abs/path/to/config-new.json
 ## Usage
 
 ```bash
-_wks
+wks
 ```
 
 ### TUI keys
@@ -121,10 +121,10 @@ _wks
 ### CLI commands
 
 ```bash
-_wks list
-_wks folders --workspace /abs/path/to/file.code-workspace
-_wks apply --workspace /abs/path/to/file.code-workspace --keep 0,2,4
-_wks validate --workspace /abs/path/to/file.code-workspace
+wks list
+wks folders --workspace /abs/path/to/file.code-workspace
+wks apply --workspace /abs/path/to/file.code-workspace --keep 0,2,4
+wks validate --workspace /abs/path/to/file.code-workspace
 ```
 
 ## Testing

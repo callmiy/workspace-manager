@@ -12,5 +12,5 @@ end, {
   complete = function()
     return { "tab", "float" }
   end,
-  desc = "Launch _wks in a terminal tab or floating terminal",
+  desc = "Launch wks in a terminal tab or floating terminal",
 })

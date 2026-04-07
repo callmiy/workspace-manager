@@ -12,14 +12,14 @@ CONTENTS                                                     *wks-contents*
 ==============================================================================
 1. Intro                                                       *wks-intro*
 
-wks.nvim is a thin launcher for the external |_wks| TUI.
+wks.nvim is a thin launcher for the external |wks| TUI.
 It does not manage workspace data directly in Neovim.
 
 ==============================================================================
 2. Requirements                                                 *wks-reqs*
 
 - Neovim 0.11+
-- The |_wks| executable available on PATH, or configured explicitly
+- The |wks| executable available on PATH, or configured explicitly
 
 ==============================================================================
 3. Setup                                                       *wks-setup*
@@ -39,7 +39,7 @@ must prepend that subdirectory to runtimepath.
     end,
     config = function()
       require("wks").setup({
-        binary = "_wks",
+        binary = "wks",
         default_mode = "tab",
         float = {
           width = 0.9,
@@ -56,15 +56,15 @@ must prepend that subdirectory to runtimepath.
 
                                                         *:Wks*
 :Wks
-    Open |_wks| with configured default mode.
+    Open |wks| with configured default mode.
 
                                                         *:Wks-tab*
 :Wks tab
-    Open |_wks| in a new tab terminal.
+    Open |wks| in a new tab terminal.
 
                                                         *:Wks-float*
 :Wks float
-    Open |_wks| in a floating terminal.
+    Open |wks| in a floating terminal.
 
 ==============================================================================
 5. Configuration                                              *wks-config*
@@ -76,7 +76,7 @@ Options:
 
                                                         *wks-config-binary*
 binary
-    string, default "_wks"
+    string, default "wks"
     Executable name or absolute path.
 
                                                   *wks-config-default_mode*

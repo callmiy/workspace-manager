@@ -49,20 +49,20 @@ jobs:
         working-directory: tui
         run: npm ci
 
-      - name: Build _wks binary
+      - name: Build wks binary
         working-directory: tui
         env:
           WKS_VERSION: ${{ env.RELEASE_TAG }}
         run: |
           mkdir -p release
-          node ./scripts/build-binary.mjs release/_wks --target ${{ matrix.target }}
-          tar -C release -czf release/_wks-${{ matrix.asset }}.tar.gz _wks
+          node ./scripts/build-binary.mjs release/wks --target ${{ matrix.target }}
+          tar -C release -czf release/wks-${{ matrix.asset }}.tar.gz wks
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: wks-${{ matrix.asset }}
-          path: tui/release/_wks-${{ matrix.asset }}.tar.gz
+          path: tui/release/wks-${{ matrix.asset }}.tar.gz
 
   release:
     name: publish-release
@@ -81,13 +81,13 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum _wks-*.tar.gz > SHA256SUMS.txt
+          sha256sum wks-*.tar.gz > SHA256SUMS.txt
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           files: |
-            dist/_wks-*.tar.gz
+            dist/wks-*.tar.gz
             dist/SHA256SUMS.txt
           generate_release_notes: true

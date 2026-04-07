@@ -26,7 +26,7 @@ case "$uname_m" in
     ;;
 esac
 
-asset="_wks-${os}-${arch}.tar.gz"
+asset="wks-${os}-${arch}.tar.gz"
 
 if [[ "$VERSION" == "latest" ]]; then
   api_url="https://api.github.com/repos/${REPO}/releases/latest"
@@ -55,9 +55,9 @@ echo "Downloading ${url}"
 curl -fL "$url" -o "$archive_path"
 
 tar -xzf "$archive_path" -C "$tmp_dir"
-install -m 0755 "$tmp_dir/_wks" "$BIN_DIR/_wks"
+install -m 0755 "$tmp_dir/wks" "$BIN_DIR/wks"
 
-echo "Installed _wks to ${BIN_DIR}/_wks"
+echo "Installed wks to ${BIN_DIR}/wks"
 case ":$PATH:" in
   *":${BIN_DIR}:"*) ;;
   *)
