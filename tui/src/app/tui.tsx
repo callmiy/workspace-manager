@@ -473,7 +473,18 @@ function App({ onExit }: { onExit: () => void }) {
   );
 
   const associateKeyHints = useMemo(
-    () => ["j/k move", "space toggle", "a/n all-none", "/ search", "s save", "esc back", "o config", "? keymaps", "q quit"],
+    () => [
+      "j/k move",
+      "space toggle",
+      "a/n all-none",
+      "/ search",
+      "s save",
+      "c cursor",
+      "esc back",
+      "o config",
+      "? keymaps",
+      "q quit",
+    ],
     [],
   );
 
@@ -924,6 +935,9 @@ function App({ onExit }: { onExit: () => void }) {
       if (key.name === "s" || key.name === "return") {
         setStatus("");
         setScreen("save");
+      }
+      if (key.name === "c") {
+        void saveAndOpenSelectionInCursor();
       }
       if (key.name === "slash" || key.name === "/" || key.sequence === "/") {
         setAssociateSearchMode(true);
