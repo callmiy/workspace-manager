@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -428,6 +428,98 @@ describe("tui e2e", () => {
       expect(editorLogs).toContain(`--wait ${fixture.workspaceConfigPath}`);
       expect(editorLogs).toContain(`--wait ${workspacePath}`);
       expect(cursorLogs).toContain(workspacePath);
+    },
+    20_000,
+  );
+
+  it(
+    "opens the root workspace file from associate workspaces and save preview",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp--worktrees/0");
+      const workspacePath = await writeWorkspaceFile(rootPath, "apischeduler.code-workspace", '{ "folders": [] }\n');
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-0", path: phpPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+
+      harness.sendKey("i");
+      await harness.waitForText(`Inspected in editor: ${workspacePath}`);
+      await harness.waitForText("Associate Workspaces");
+
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKey("i");
+      await harness.waitForText(`Inspected in editor: ${workspacePath}`);
+      await harness.waitForText("Save Preview");
+
+      const editorLogs = await readLogLines(fixture.editorLogPath);
+      expect(editorLogs.filter((line) => line === `--wait ${workspacePath}`)).toHaveLength(2);
+    },
+    20_000,
+  );
+
+  it(
+    "creates and opens the root workspace file from associate workspaces and save preview when missing",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/scheduler-frontend--worktrees/0");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp--worktrees/0");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "frontend",
+          paths: [{ name: "APISCHEDULER-FRONTEND-0", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-0", path: phpPath }],
+        },
+      ]);
+
+      const targetWorkspacePath = path.join(rootPath, "apischeduler-frontend-0.code-workspace");
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKey("Space");
+      await harness.waitForText("[x] PHPAPP-0");
+
+      harness.sendKey("i");
+      await harness.waitForText(`Inspected in editor: ${targetWorkspacePath}`);
+      await harness.waitForText("Associate Workspaces");
+
+      let saved = await readFile(targetWorkspacePath, "utf8");
+      expect(saved).toContain('"name": "APISCHEDULER-FRONTEND-0"');
+      expect(saved).toContain('"name": "PHPAPP-0"');
+
+      await rm(targetWorkspacePath);
+
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKey("i");
+      await harness.waitForText(`Inspected in editor: ${targetWorkspacePath}`);
+      await harness.waitForText("Save Preview");
+
+      saved = await readFile(targetWorkspacePath, "utf8");
+      expect(saved).toContain('"name": "APISCHEDULER-FRONTEND-0"');
+      expect(saved).toContain('"name": "PHPAPP-0"');
+
+      const editorLogs = await readLogLines(fixture.editorLogPath);
+      expect(editorLogs.filter((line) => line === `--wait ${targetWorkspacePath}`)).toHaveLength(2);
     },
     20_000,
   );

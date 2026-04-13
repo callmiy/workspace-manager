@@ -255,12 +255,25 @@ type SaveResult = {
   folderCount: number;
 };
 
+type FolderObject = Record<string, unknown>;
+
 function buildFolderObjects(root: WorkspaceRef, associates: WorkspaceRef[]): Record<string, unknown>[] {
   return [root, ...associates].map((workspace) => ({
     name: workspace.name,
     path: workspace.path,
     ...workspace.metadata,
   }));
+}
+
+function toWorkspaceWriteEntries(folders: FolderObject[]): { name: string; path: string; metadata: Record<string, unknown> }[] {
+  return folders.map((entry) => {
+    const { name, path: folderPath, ...metadata } = entry;
+    return {
+      name: String(name),
+      path: String(folderPath),
+      metadata,
+    };
+  });
 }
 
 function buildPreselectedAssociatePaths(root: WorkspaceRef, candidates: WorkspaceRef[], folderPaths: string[]): Set<string> {
@@ -480,6 +493,7 @@ function App({ onExit }: { onExit: () => void }) {
       "/ search",
       "s save",
       "c cursor",
+      "i inspect",
       "esc back",
       "o config",
       "? keymaps",
@@ -488,7 +502,7 @@ function App({ onExit }: { onExit: () => void }) {
     [],
   );
 
-  const saveKeyHints = useMemo(() => ["Enter/y save", "c save+cursor", "Esc/n back", "o config", "? keymaps"], []);
+  const saveKeyHints = useMemo(() => ["Enter/y save", "c save+cursor", "i inspect", "Esc/n back", "o config", "? keymaps"], []);
 
   const rootVisibleRows = useMemo(() => {
     const chromeRows =
@@ -643,14 +657,7 @@ function App({ onExit }: { onExit: () => void }) {
 
     setIsSaving(true);
 
-    const folders = previewFolders.map((entry) => {
-      const { name, path: folderPath, ...metadata } = entry;
-      return {
-        name: String(name),
-        path: String(folderPath),
-        metadata,
-      };
-    });
+    const folders = toWorkspaceWriteEntries(previewFolders);
 
     try {
       const existingTarget = await resolveWorkspaceTarget(selectedRoot.path);
@@ -804,6 +811,14 @@ function App({ onExit }: { onExit: () => void }) {
       return;
     }
 
+    await openRootWorkspaceInEditor(root, buildFolderObjects(root, []));
+  }
+
+  async function openRootWorkspaceInEditor(root: WorkspaceRef, foldersForCreation: FolderObject[]): Promise<void> {
+    if (!root) {
+      return;
+    }
+
     const editor = process.env.EDITOR;
     if (!editor) {
       setStatus("Cannot inspect workspace: $EDITOR is not set", "error");
@@ -816,10 +831,15 @@ function App({ onExit }: { onExit: () => void }) {
       return;
     }
 
-    const workspacePath = await resolveWorkspaceTarget(resolvedRootPath);
+    let workspacePath = await resolveWorkspaceTarget(resolvedRootPath);
     if (!workspacePath) {
-      setStatus(`Cannot inspect workspace: no .code-workspace found under ${resolvedRootPath}`, "error");
-      return;
+      workspacePath = path.join(resolvedRootPath, lowerCaseWorkspaceFilename(root.name));
+      try {
+        await writeWorkspaceFolders(workspacePath, toWorkspaceWriteEntries(foldersForCreation), false);
+      } catch (error: unknown) {
+        setStatus(`Cannot inspect workspace: ${String(error)}`, "error");
+        return;
+      }
     }
 
     const result = launchEditorWithFile(editor, workspacePath);
@@ -939,6 +959,9 @@ function App({ onExit }: { onExit: () => void }) {
       if (key.name === "c") {
         void saveAndOpenSelectionInCursor();
       }
+      if (key.name === "i" && selectedRoot) {
+        void openRootWorkspaceInEditor(selectedRoot, previewFolders);
+      }
       if (key.name === "slash" || key.name === "/" || key.sequence === "/") {
         setAssociateSearchMode(true);
       }
@@ -956,6 +979,9 @@ function App({ onExit }: { onExit: () => void }) {
       }
       if (key.name === "c") {
         void saveAndOpenSelectionInCursor();
+      }
+      if (key.name === "i" && selectedRoot) {
+        void openRootWorkspaceInEditor(selectedRoot, previewFolders);
       }
       if (key.name === "escape" || key.name === "n") {
         setScreen("associate");
