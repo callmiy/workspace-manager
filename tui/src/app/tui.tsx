@@ -256,6 +256,7 @@ type SaveResult = {
 };
 
 type FolderObject = Record<string, unknown>;
+type WorkspaceWriteEntry = { name: string; path: string; metadata: Record<string, unknown> };
 
 function buildFolderObjects(root: WorkspaceRef, associates: WorkspaceRef[]): Record<string, unknown>[] {
   return [root, ...associates].map((workspace) => ({
@@ -265,7 +266,7 @@ function buildFolderObjects(root: WorkspaceRef, associates: WorkspaceRef[]): Rec
   }));
 }
 
-function toWorkspaceWriteEntries(folders: FolderObject[]): { name: string; path: string; metadata: Record<string, unknown> }[] {
+function toWorkspaceWriteEntries(folders: FolderObject[]): WorkspaceWriteEntry[] {
   return folders.map((entry) => {
     const { name, path: folderPath, ...metadata } = entry;
     return {
@@ -306,6 +307,53 @@ function applyDetectedVirtualEnv(rootPath: string, envVars: Record<string, strin
     VIRTUAL_ENV: virtualEnvPath,
     PATH: `${path.join(virtualEnvPath, "bin")}${currentPath ? `:${currentPath}` : ""}`,
   };
+}
+
+function copyTextToClipboard(text: string): true | string {
+  const clipboardCommands: Array<{ binary: string; args: string[] }> = [
+    { binary: "wl-copy", args: [] },
+    { binary: "xclip", args: ["-selection", "clipboard"] },
+    { binary: "xsel", args: ["--clipboard", "--input"] },
+    { binary: "pbcopy", args: [] },
+    { binary: "clip.exe", args: [] },
+  ];
+
+  const errors: string[] = [];
+
+  for (const command of clipboardCommands) {
+    const result = spawnSync(command.binary, command.args, {
+      input: text,
+      encoding: "utf8",
+      shell: false,
+    });
+
+    if (result.error) {
+      const errorCode = (result.error as NodeJS.ErrnoException).code;
+      if (errorCode === "ENOENT") {
+        continue;
+      }
+      errors.push(`${command.binary}: ${String(result.error)}`);
+      continue;
+    }
+
+    if (typeof result.status === "number" && result.status !== 0) {
+      const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+      errors.push(
+        stderr
+          ? `${command.binary}: exited with status ${result.status}: ${stderr}`
+          : `${command.binary}: exited with status ${result.status}`,
+      );
+      continue;
+    }
+
+    return true;
+  }
+
+  if (errors.length === 0) {
+    return "No clipboard tool found. Install wl-copy, xclip, xsel, pbcopy, or clip.exe";
+  }
+
+  return `Failed to copy to clipboard: ${errors.join("; ")}`;
 }
 
 function KeymapLine({ hints }: { hints: string[] }) {
@@ -481,7 +529,7 @@ function App({ onExit }: { onExit: () => void }) {
   }, [selectedRoot]);
 
   const rootKeyHints = useMemo(
-    () => ["j/k move", "Enter open", "/ search", "r refresh", "c cursor", "i inspect", "o config", "? keymaps", "q quit"],
+    () => ["j/k move", "Enter open", "/ search", "r refresh", "c cursor", "i inspect", "y copy path", "o config", "? keymaps", "q quit"],
     [],
   );
 
@@ -494,6 +542,7 @@ function App({ onExit }: { onExit: () => void }) {
       "s save",
       "c cursor",
       "i inspect",
+      "y copy path",
       "esc back",
       "o config",
       "? keymaps",
@@ -502,7 +551,10 @@ function App({ onExit }: { onExit: () => void }) {
     [],
   );
 
-  const saveKeyHints = useMemo(() => ["Enter/s save", "c save+cursor", "i inspect", "Esc/n back", "o config", "? keymaps"], []);
+  const saveKeyHints = useMemo(
+    () => ["Enter/s save", "c save+cursor", "i inspect", "y copy path", "Esc/n back", "o config", "? keymaps"],
+    [],
+  );
 
   const rootVisibleRows = useMemo(() => {
     const chromeRows =
@@ -814,6 +866,25 @@ function App({ onExit }: { onExit: () => void }) {
     await openRootWorkspaceInEditor(root, buildFolderObjects(root, []));
   }
 
+  async function resolveOrCreateRootWorkspacePath(root: WorkspaceRef, foldersForCreation: FolderObject[]): Promise<string | null> {
+    if (!root) {
+      return null;
+    }
+
+    const resolvedRootPath = path.resolve(root.path);
+    if (!existsSync(resolvedRootPath)) {
+      throw new Error(`folder does not exist: ${resolvedRootPath}`);
+    }
+
+    let workspacePath = await resolveWorkspaceTarget(resolvedRootPath);
+    if (!workspacePath) {
+      workspacePath = path.join(resolvedRootPath, lowerCaseWorkspaceFilename(root.name));
+      await writeWorkspaceFolders(workspacePath, toWorkspaceWriteEntries(foldersForCreation), false);
+    }
+
+    return workspacePath;
+  }
+
   async function openRootWorkspaceInEditor(root: WorkspaceRef, foldersForCreation: FolderObject[]): Promise<void> {
     if (!root) {
       return;
@@ -825,21 +896,16 @@ function App({ onExit }: { onExit: () => void }) {
       return;
     }
 
-    const resolvedRootPath = path.resolve(root.path);
-    if (!existsSync(resolvedRootPath)) {
-      setStatus(`Cannot inspect workspace: folder does not exist: ${resolvedRootPath}`, "error");
-      return;
-    }
-
-    let workspacePath = await resolveWorkspaceTarget(resolvedRootPath);
-    if (!workspacePath) {
-      workspacePath = path.join(resolvedRootPath, lowerCaseWorkspaceFilename(root.name));
-      try {
-        await writeWorkspaceFolders(workspacePath, toWorkspaceWriteEntries(foldersForCreation), false);
-      } catch (error: unknown) {
-        setStatus(`Cannot inspect workspace: ${String(error)}`, "error");
+    let workspacePath: string;
+    try {
+      const resolved = await resolveOrCreateRootWorkspacePath(root, foldersForCreation);
+      if (!resolved) {
         return;
       }
+      workspacePath = resolved;
+    } catch (error: unknown) {
+      setStatus(`Cannot inspect workspace: ${String(error)}`, "error");
+      return;
     }
 
     const result = launchEditorWithFile(editor, workspacePath);
@@ -861,6 +927,28 @@ function App({ onExit }: { onExit: () => void }) {
     process.stdout.write("\x1b[2J\x1b[H");
     setRenderEpoch((value) => value + 1);
     setStatus(`Inspected in editor: ${workspacePath}`, "success");
+  }
+
+  async function copyRootWorkspacePath(root: WorkspaceRef, foldersForCreation: FolderObject[]): Promise<void> {
+    let workspacePath: string;
+    try {
+      const resolved = await resolveOrCreateRootWorkspacePath(root, foldersForCreation);
+      if (!resolved) {
+        return;
+      }
+      workspacePath = resolved;
+    } catch (error: unknown) {
+      setStatus(`Cannot copy workspace path: ${String(error)}`, "error");
+      return;
+    }
+
+    const result = copyTextToClipboard(workspacePath);
+    if (result !== true) {
+      setStatus(result, "error");
+      return;
+    }
+
+    setStatus(`Copied workspace path: ${workspacePath}`, "success");
   }
 
   useKeyboard((key) => {
@@ -926,6 +1014,12 @@ function App({ onExit }: { onExit: () => void }) {
       if (key.name === "i") {
         void openSelectedRootInEditor();
       }
+      if (key.name === "y") {
+        const root = filteredRoots[selectedRootIndex];
+        if (root) {
+          void copyRootWorkspacePath(root, buildFolderObjects(root, []));
+        }
+      }
       if (key.name === "slash" || key.name === "/" || key.sequence === "/") {
         setRootSearchMode(true);
       }
@@ -962,6 +1056,9 @@ function App({ onExit }: { onExit: () => void }) {
       if (key.name === "i" && selectedRoot) {
         void openRootWorkspaceInEditor(selectedRoot, previewFolders);
       }
+      if (key.name === "y" && selectedRoot) {
+        void copyRootWorkspacePath(selectedRoot, previewFolders);
+      }
       if (key.name === "slash" || key.name === "/" || key.sequence === "/") {
         setAssociateSearchMode(true);
       }
@@ -982,6 +1079,9 @@ function App({ onExit }: { onExit: () => void }) {
       }
       if (key.name === "i" && selectedRoot) {
         void openRootWorkspaceInEditor(selectedRoot, previewFolders);
+      }
+      if (key.name === "y" && selectedRoot) {
+        void copyRootWorkspacePath(selectedRoot, previewFolders);
       }
       if (key.name === "escape" || key.name === "n") {
         setScreen("associate");

@@ -18,6 +18,7 @@ type FixtureContext = {
   binDir: string;
   editorLogPath: string;
   cursorLogPath: string;
+  clipboardLogPath: string;
   nvimLogPath: string;
   cursorEnvLogPath: string;
 };
@@ -41,12 +42,14 @@ export async function createFixtureContext(): Promise<FixtureContext> {
   const binDir = path.join(rootDir, "bin");
   const editorLogPath = path.join(rootDir, "editor.log");
   const cursorLogPath = path.join(rootDir, "cursor.log");
+  const clipboardLogPath = path.join(rootDir, "clipboard.log");
   const cursorEnvLogPath = path.join(rootDir, "cursor-env.log");
   const nvimLogPath = path.join(rootDir, "nvim.log");
 
   await mkdir(binDir, { recursive: true });
   await writeStubBinary(path.join(binDir, "stub-editor"), editorLogPath);
   await writeStubBinary(path.join(binDir, "cursor"), cursorLogPath, cursorEnvLogPath);
+  await writeClipboardStub(path.join(binDir, "wl-copy"), clipboardLogPath);
   await writeStubBinary(path.join(binDir, "nvim"), nvimLogPath);
 
   return {
@@ -55,6 +58,7 @@ export async function createFixtureContext(): Promise<FixtureContext> {
     binDir,
     editorLogPath,
     cursorLogPath,
+    clipboardLogPath,
     nvimLogPath,
     cursorEnvLogPath,
   };
@@ -70,6 +74,16 @@ if [[ -n "\${WKS_STUB_ENV_KEYS:-}" ]] && [[ -n ${JSON.stringify(envLogPath ?? ""
     printf '%s=%s\\n' "$__wks_key" "\${!__wks_key-}" >> ${JSON.stringify(envLogPath ?? "")}
   done < <(printf '%s\\n' "$WKS_STUB_ENV_KEYS" | tr ',' '\\n')
 fi
+`;
+  await writeFile(filePath, script, "utf8");
+  await chmod(filePath, 0o755);
+}
+
+async function writeClipboardStub(filePath: string, logPath: string): Promise<void> {
+  const script = `#!/usr/bin/env bash
+set -euo pipefail
+cat >> ${JSON.stringify(logPath)}
+printf '\\n' >> ${JSON.stringify(logPath)}
 `;
   await writeFile(filePath, script, "utf8");
   await chmod(filePath, 0o755);
