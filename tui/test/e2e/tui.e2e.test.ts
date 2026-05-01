@@ -640,6 +640,38 @@ describe("tui e2e", () => {
   );
 
   it(
+    "saves from save preview with s",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      await harness.waitForText("Enter/s save");
+      harness.sendKey("s");
+
+      const targetWorkspacePath = path.join(rootPath, "apischeduler-backend-m.code-workspace");
+      await harness.waitForText(`Saved 1 folder(s) to ${targetWorkspacePath}`);
+      await harness.waitForText("Root Workspace");
+
+      const cursorLogs = await readLogLines(fixture.cursorLogPath);
+      expect(cursorLogs).toHaveLength(0);
+    },
+    20_000,
+  );
+
+  it(
     "uses parent nvim remote open when running inside nvim and editor is nvim-family",
     async () => {
       const fixture = await setupFixture();

@@ -502,7 +502,7 @@ function App({ onExit }: { onExit: () => void }) {
     [],
   );
 
-  const saveKeyHints = useMemo(() => ["Enter/y save", "c save+cursor", "i inspect", "Esc/n back", "o config", "? keymaps"], []);
+  const saveKeyHints = useMemo(() => ["Enter/s save", "c save+cursor", "i inspect", "Esc/n back", "o config", "? keymaps"], []);
 
   const rootVisibleRows = useMemo(() => {
     const chromeRows =
@@ -974,7 +974,7 @@ function App({ onExit }: { onExit: () => void }) {
     }
 
     if (screen === "save") {
-      if (key.name === "return" || key.name === "y") {
+      if (key.name === "return" || key.name === "s") {
         void saveSelection();
       }
       if (key.name === "c") {
