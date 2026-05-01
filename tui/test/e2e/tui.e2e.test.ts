@@ -486,6 +486,97 @@ describe("tui e2e", () => {
   );
 
   it(
+    "copies the root workspace filename stem with 1y from all screens",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp--worktrees/0");
+      const workspacePath = await writeWorkspaceFile(rootPath, "apischeduler.code-workspace", '{ "folders": [] }\n');
+      const filenameStem = path.basename(workspacePath, ".code-workspace");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-0", path: phpPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKeys(["1", "y"]);
+      await harness.waitForText(`Copied workspace filename: ${filenameStem}`);
+
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKeys(["1", "y"]);
+      await harness.waitForText(`Copied workspace filename: ${filenameStem}`);
+
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKeys(["1", "y"]);
+      await harness.waitForText(`Copied workspace filename: ${filenameStem}`);
+
+      const clipboardLogs = await readLogLines(fixture.clipboardLogPath);
+      expect(clipboardLogs).toEqual([filenameStem, filenameStem, filenameStem]);
+    },
+    20_000,
+  );
+
+  it(
+    "creates and copies the root workspace filename stem with 1y when missing",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/scheduler-frontend--worktrees/0");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp--worktrees/0");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "frontend",
+          paths: [{ name: "APISCHEDULER-FRONTEND-0", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-0", path: phpPath }],
+        },
+      ]);
+
+      const targetWorkspacePath = path.join(rootPath, "apischeduler-frontend-0.code-workspace");
+      const filenameStem = path.basename(targetWorkspacePath, ".code-workspace");
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKey("Space");
+      await harness.waitForText("[x] PHPAPP-0");
+      harness.sendKeys(["1", "y"]);
+      await harness.waitForText(`Copied workspace filename: ${filenameStem}`);
+
+      let saved = await readFile(targetWorkspacePath, "utf8");
+      expect(saved).toContain('"name": "APISCHEDULER-FRONTEND-0"');
+      expect(saved).toContain('"name": "PHPAPP-0"');
+
+      await rm(targetWorkspacePath);
+
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKeys(["1", "y"]);
+      await harness.waitForText(`Copied workspace filename: ${filenameStem}`);
+
+      saved = await readFile(targetWorkspacePath, "utf8");
+      expect(saved).toContain('"name": "APISCHEDULER-FRONTEND-0"');
+      expect(saved).toContain('"name": "PHPAPP-0"');
+
+      const clipboardLogs = await readLogLines(fixture.clipboardLogPath);
+      expect(clipboardLogs).toEqual([filenameStem, filenameStem]);
+    },
+    20_000,
+  );
+
+  it(
     "stubs editor and cursor launches and returns to a valid UI state",
     async () => {
       const fixture = await setupFixture();

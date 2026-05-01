@@ -394,6 +394,7 @@ function App({ onExit }: { onExit: () => void }) {
   const [renderEpoch, setRenderEpoch] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [previewTargetPath, setPreviewTargetPath] = useState("");
+  const [pendingCopyPrefix, setPendingCopyPrefix] = useState("");
   const refreshRequestIdRef = useRef(0);
   const messageFg =
     messageTone === "error" ? "#f87171" : messageTone === "success" ? "#4ade80" : undefined;
@@ -951,6 +952,29 @@ function App({ onExit }: { onExit: () => void }) {
     setStatus(`Copied workspace path: ${workspacePath}`, "success");
   }
 
+  async function copyRootWorkspaceFilenameStem(root: WorkspaceRef, foldersForCreation: FolderObject[]): Promise<void> {
+    let workspacePath: string;
+    try {
+      const resolved = await resolveOrCreateRootWorkspacePath(root, foldersForCreation);
+      if (!resolved) {
+        return;
+      }
+      workspacePath = resolved;
+    } catch (error: unknown) {
+      setStatus(`Cannot copy workspace filename: ${String(error)}`, "error");
+      return;
+    }
+
+    const filenameStem = path.basename(workspacePath, ".code-workspace");
+    const result = copyTextToClipboard(filenameStem);
+    if (result !== true) {
+      setStatus(result, "error");
+      return;
+    }
+
+    setStatus(`Copied workspace filename: ${filenameStem}`, "success");
+  }
+
   useKeyboard((key) => {
     if (rootSearchMode && screen === "roots") {
       if (key.name === "escape" || key.name === "return") {
@@ -980,6 +1004,30 @@ function App({ onExit }: { onExit: () => void }) {
         setAssociateSearch((current) => `${current}${key.sequence}`);
       }
       return;
+    }
+
+    if (!pendingCopyPrefix && key.name === "1") {
+      setPendingCopyPrefix("1");
+      return;
+    }
+
+    if (pendingCopyPrefix) {
+      const prefix = pendingCopyPrefix;
+      setPendingCopyPrefix("");
+
+      if (prefix === "1" && key.name === "y") {
+        if (screen === "roots") {
+          const root = filteredRoots[selectedRootIndex];
+          if (root) {
+            void copyRootWorkspaceFilenameStem(root, buildFolderObjects(root, []));
+          }
+          return;
+        }
+        if (selectedRoot) {
+          void copyRootWorkspaceFilenameStem(selectedRoot, previewFolders);
+          return;
+        }
+      }
     }
 
     if ((key.ctrl && key.name === "c") || key.name === "q") {
