@@ -577,6 +577,84 @@ describe("tui e2e", () => {
   );
 
   it(
+    "copies the root workspace directory with 2y from all screens",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp--worktrees/0");
+      await writeWorkspaceFile(rootPath, "apischeduler.code-workspace", '{ "folders": [] }\n');
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-0", path: phpPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKeys(["2", "y"]);
+      await harness.waitForText(`Copied workspace directory: ${rootPath}`);
+
+      harness.sendKey("Enter");
+      await harness.waitForText("Associate Workspaces");
+      harness.sendKeys(["2", "y"]);
+      await harness.waitForText(`Copied workspace directory: ${rootPath}`);
+
+      harness.sendKey("Enter");
+      await harness.waitForText("Save Preview");
+      harness.sendKeys(["2", "y"]);
+      await harness.waitForText(`Copied workspace directory: ${rootPath}`);
+
+      const clipboardLogs = await readLogLines(fixture.clipboardLogPath);
+      expect(clipboardLogs).toEqual([rootPath, rootPath, rootPath]);
+    },
+    20_000,
+  );
+
+  it(
+    "copies the root workspace directory with 2y without creating a workspace file",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/accloud-home-service");
+      const phpPath = await createWorkspaceDir(fixture.rootDir, "services/phpapp--worktrees/0");
+
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "home",
+          metadata: {
+            "docker-service": "home-frontend",
+          },
+          paths: [{ name: "HOME-FRONTEND-M", path: rootPath }],
+        },
+        {
+          group: "php",
+          paths: [{ name: "PHPAPP-0", path: phpPath }],
+        },
+      ]);
+
+      const targetWorkspacePath = path.join(rootPath, "home-frontend-m.code-workspace");
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("Root Workspace");
+      harness.sendKeys(["2", "y"]);
+      await harness.waitForText(`Copied workspace directory: ${rootPath}`);
+
+      await harness.waitForMissingText(`Copied workspace path: ${targetWorkspacePath}`, 500);
+      await harness.waitForMissingText(`Copied workspace filename: home-frontend-m`, 500);
+
+      const clipboardLogs = await readLogLines(fixture.clipboardLogPath);
+      expect(clipboardLogs).toEqual([rootPath]);
+
+      await expect(readFile(targetWorkspacePath, "utf8")).rejects.toThrow();
+    },
+    20_000,
+  );
+
+  it(
     "stubs editor and cursor launches and returns to a valid UI state",
     async () => {
       const fixture = await setupFixture();

@@ -975,6 +975,17 @@ function App({ onExit }: { onExit: () => void }) {
     setStatus(`Copied workspace filename: ${filenameStem}`, "success");
   }
 
+  function copyRootDirectoryPath(root: WorkspaceRef): void {
+    const directoryPath = path.resolve(root.path);
+    const result = copyTextToClipboard(directoryPath);
+    if (result !== true) {
+      setStatus(result, "error");
+      return;
+    }
+
+    setStatus(`Copied workspace directory: ${directoryPath}`, "success");
+  }
+
   useKeyboard((key) => {
     if (rootSearchMode && screen === "roots") {
       if (key.name === "escape" || key.name === "return") {
@@ -1006,8 +1017,8 @@ function App({ onExit }: { onExit: () => void }) {
       return;
     }
 
-    if (!pendingCopyPrefix && key.name === "1") {
-      setPendingCopyPrefix("1");
+    if (!pendingCopyPrefix && (key.name === "1" || key.name === "2")) {
+      setPendingCopyPrefix(key.name);
       return;
     }
 
@@ -1025,6 +1036,20 @@ function App({ onExit }: { onExit: () => void }) {
         }
         if (selectedRoot) {
           void copyRootWorkspaceFilenameStem(selectedRoot, previewFolders);
+          return;
+        }
+      }
+
+      if (prefix === "2" && key.name === "y") {
+        if (screen === "roots") {
+          const root = filteredRoots[selectedRootIndex];
+          if (root) {
+            copyRootDirectoryPath(root);
+          }
+          return;
+        }
+        if (selectedRoot) {
+          copyRootDirectoryPath(selectedRoot);
           return;
         }
       }
