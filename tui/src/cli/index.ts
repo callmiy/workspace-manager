@@ -11,15 +11,23 @@ type ParsedArgs = {
 };
 
 function parseArgs(argv: string[]): ParsedArgs {
+  if (argv.length > 0 && argv[0]?.startsWith("--")) {
+    return { command: undefined, flags: parseFlags(argv) };
+  }
+
   if (argv.length === 1 && (argv[0] === "-v" || argv[0] === "--version")) {
     return { command: "version", flags: new Map() };
   }
 
   const [command, ...rest] = argv;
+  return { command, flags: parseFlags(rest) };
+}
+
+function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
 
-  for (let i = 0; i < rest.length; i += 1) {
-    const token = rest[i];
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
     if (!token.startsWith("--")) {
       throw new Error(`Unknown argument: ${token}`);
     }
@@ -43,7 +51,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       throw new Error(`Invalid flag syntax: ${token}`);
     }
 
-    const next = rest[i + 1];
+    const next = argv[i + 1];
     if (next === undefined || next.startsWith("--")) {
       throw new Error(`Missing value for --${key}`);
     }
@@ -51,7 +59,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     i += 1;
   }
 
-  return { command, flags };
+  return flags;
 }
 
 function parseKeepIndexes(value: string | undefined): number[] {
@@ -67,6 +75,7 @@ function parseKeepIndexes(value: string | undefined): number[] {
 function printUsage(): void {
   console.log(`wks commands:
   wks                               Launch interactive TUI
+  wks --feature <name>              Launch TUI feature hub at workspace-manager|mcp
   wks -v | --version                Print version
   wks list                          List discovered workspace files
   wks folders --workspace <path>    List folder entries for workspace
@@ -78,7 +87,11 @@ async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   if (!args.command) {
-    await runTui();
+    const requestedFeature = args.flags.get("feature");
+    if (requestedFeature && requestedFeature !== "workspace-manager" && requestedFeature !== "mcp") {
+      throw new Error(`Invalid --feature value: ${requestedFeature}`);
+    }
+    await runTui({ initialFeature: requestedFeature as "workspace-manager" | "mcp" | undefined });
     return;
   }
 

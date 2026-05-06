@@ -29,11 +29,12 @@ function runTmux(args: string[]): string {
   }).trimEnd();
 }
 
-function buildShellCommand(env: Record<string, string>, entrypoint: string): string {
+function buildShellCommand(env: Record<string, string>, entrypoint: string, args: string[] = []): string {
   const envPrefix = Object.entries(env)
     .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
     .join(" ");
-  return `${envPrefix} bun run ${JSON.stringify(entrypoint)}`;
+  const argSuffix = args.map((arg) => JSON.stringify(arg)).join(" ");
+  return `${envPrefix} bun run ${JSON.stringify(entrypoint)}${argSuffix ? ` ${argSuffix}` : ""}`;
 }
 
 export async function createFixtureContext(): Promise<FixtureContext> {
@@ -150,6 +151,7 @@ export class TmuxHarness {
   static async launch(options: {
     workdir: string;
     entrypoint: string;
+    args?: string[];
     configPath: string;
     binDir: string;
     editorCommand?: string;
@@ -177,7 +179,7 @@ export class TmuxHarness {
       "40",
       "-c",
       options.workdir,
-      buildShellCommand(env, options.entrypoint),
+      buildShellCommand(env, options.entrypoint, options.args),
     ]);
 
     return new TmuxHarness(sessionName);

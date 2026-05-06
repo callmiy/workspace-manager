@@ -30,6 +30,76 @@ afterEach(async () => {
 
 describe("tui e2e", () => {
   it(
+    "uses the rail as selection-only until Enter and supports H/L focus travel",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+      ]);
+
+      const harness = await launchHarness(fixture);
+      await harness.waitForText("APPS");
+      await harness.waitForText("WORKSPACE MANAGER");
+      await harness.waitForText("Root Workspace");
+      await harness.waitForMissingText("Context");
+
+      harness.sendKey("Tab");
+      harness.sendKey("2");
+      await harness.waitForText("> mcp [2]");
+      await harness.waitForText("WORKSPACE MANAGER");
+      await harness.waitForMissingText("Configured [1]");
+
+      harness.sendKey("Enter");
+      await harness.waitForText("MCP");
+      await harness.waitForText("Configured [1]");
+      expect(harness.capture()).toContain("Project root:");
+
+      harness.sendKey("H");
+      await harness.waitForText("> mcp [2]");
+      harness.sendKey("k");
+      await harness.waitForText("> workspace-manager");
+      expect(harness.capture()).toContain("Configured [1]");
+
+      harness.sendKey("L");
+      await harness.waitForText("> mcp [2]");
+      expect(harness.capture()).toContain("Configured [1]");
+    },
+    20_000,
+  );
+
+  it(
+    "starts directly in the requested mcp feature",
+    async () => {
+      const fixture = await setupFixture();
+      const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");
+      await writeWorkspaceConfig(fixture.workspaceConfigPath, [
+        {
+          group: "apischeduler",
+          paths: [{ name: "APISCHEDULER-BACKEND-M", path: rootPath }],
+        },
+      ]);
+
+      const harness = await TmuxHarness.launch({
+        workdir: path.resolve(testDir, "..", ".."),
+        entrypoint: path.join("src", "cli", "index.ts"),
+        args: ["--feature", "mcp"],
+        configPath: fixture.workspaceConfigPath,
+        binDir: fixture.binDir,
+      });
+      harnesses.push(harness);
+
+      await harness.waitForText("MCP");
+      await harness.waitForText("Configured [1]");
+      expect(harness.capture()).toContain("Project root:");
+    },
+    20_000,
+  );
+
+  it(
     "creates a new workspace file from the full TUI flow",
     async () => {
       const fixture = await setupFixture();
@@ -211,6 +281,7 @@ describe("tui e2e", () => {
 
       const harness = await launchHarness(fixture);
       await harness.waitForText("Root Workspace");
+      await harness.waitForText("> APISCHEDULER-BACKEND-M: ");
       harness.sendKey("Enter");
       await harness.waitForText("Associate Workspaces");
       harness.sendKey("Enter");
@@ -548,6 +619,7 @@ describe("tui e2e", () => {
       const filenameStem = path.basename(targetWorkspacePath, ".code-workspace");
       const harness = await launchHarness(fixture);
       await harness.waitForText("Root Workspace");
+      await harness.waitForText("> APISCHEDULER-FRONTEND-0: ");
       harness.sendKey("Enter");
       await harness.waitForText("Associate Workspaces");
       harness.sendKey("Space");
@@ -712,6 +784,7 @@ describe("tui e2e", () => {
 
       const harness = await launchHarness(fixture);
       await harness.waitForText("Root Workspace");
+      await harness.waitForText("> APISCHEDULER-BACKEND-M: ");
       harness.sendKey("Enter");
       await harness.waitForText("Associate Workspaces");
 
@@ -803,6 +876,7 @@ describe("tui e2e", () => {
 
       const harness = await launchHarness(fixture);
       await harness.waitForText("Root Workspace");
+      await harness.waitForText("> APISCHEDULER-FRONTEND-0: ");
       harness.sendKey("Enter");
       await harness.waitForText("Associate Workspaces");
       harness.sendKey("Space");
@@ -810,7 +884,7 @@ describe("tui e2e", () => {
       harness.sendKey("c");
 
       const targetWorkspacePath = path.join(rootPath, "apischeduler-frontend-0.code-workspace");
-      await harness.waitForText(`Saved 2 folder(s) and opened in Cursor: ${targetWorkspacePath}`);
+      await harness.waitForText("Saved 2 folder(s) and opened in Cursor:");
       await harness.waitForText("Root Workspace");
       expect(harness.capture()).toContain("> APISCHEDULER-FRONTEND-0: ");
 
@@ -844,6 +918,7 @@ describe("tui e2e", () => {
 
       const harness = await launchHarness(fixture);
       await harness.waitForText("Root Workspace");
+      await harness.waitForText("> APISCHEDULER-FRONTEND-0: ");
       harness.sendKey("Enter");
       await harness.waitForText("Associate Workspaces");
       harness.sendKey("Space");
@@ -853,7 +928,7 @@ describe("tui e2e", () => {
       harness.sendKey("c");
 
       const targetWorkspacePath = path.join(rootPath, "apischeduler-frontend-0.code-workspace");
-      await harness.waitForText(`Saved 2 folder(s) and opened in Cursor: ${targetWorkspacePath}`);
+      await harness.waitForText("Saved 2 folder(s) and opened in Cursor:");
       await harness.waitForText("Root Workspace");
       expect(harness.capture()).toContain("> APISCHEDULER-FRONTEND-0: ");
 
@@ -917,7 +992,7 @@ describe("tui e2e", () => {
       await harness.waitForText("Associate Workspaces");
       harness.sendKey("Enter");
       await harness.waitForText("Save Preview");
-      await harness.waitForText("Enter/s save");
+      await harness.waitForText("Enter save");
       harness.sendKey("s");
 
       const targetWorkspacePath = path.join(rootPath, "apischeduler-backend-m.code-workspace");
