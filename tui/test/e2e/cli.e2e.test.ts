@@ -21,6 +21,30 @@ afterEach(async () => {
 });
 
 describe("cli e2e", () => {
+  it("prints the version for both -v and --version", async () => {
+    const fixture = await setupFixture();
+
+    const shortResult = runCliCommand({
+      workdir: tuiDir,
+      entrypoint,
+      configPath: fixture.workspaceConfigPath,
+      args: ["-v"],
+    });
+    const longResult = runCliCommand({
+      workdir: tuiDir,
+      entrypoint,
+      configPath: fixture.workspaceConfigPath,
+      args: ["--version"],
+    });
+
+    expect(shortResult.status).toBe(0);
+    expect(longResult.status).toBe(0);
+    expect(shortResult.stdout).toBe(longResult.stdout);
+    expect(shortResult.stdout).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(shortResult.stderr).toBe("");
+    expect(longResult.stderr).toBe("");
+  });
+
   it("lists configured workspaces from the config file", async () => {
     const fixture = await setupFixture();
     const rootPath = await createWorkspaceDir(fixture.rootDir, "services/api.scheduler");

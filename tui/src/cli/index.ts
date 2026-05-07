@@ -11,12 +11,12 @@ type ParsedArgs = {
 };
 
 function parseArgs(argv: string[]): ParsedArgs {
-  if (argv.length > 0 && argv[0]?.startsWith("--")) {
-    return { command: undefined, flags: parseFlags(argv) };
-  }
-
   if (argv.length === 1 && (argv[0] === "-v" || argv[0] === "--version")) {
     return { command: "version", flags: new Map() };
+  }
+
+  if (argv.length > 0 && argv[0]?.startsWith("--")) {
+    return { command: undefined, flags: parseFlags(argv) };
   }
 
   const [command, ...rest] = argv;
